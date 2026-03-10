@@ -1,0 +1,25 @@
+{
+  "name": "claude-profile",
+  "version": "1.0.0",
+  "description": "Sync ~/.claude profiles across devices via a private GitHub repo",
+  "type": "module",
+  "bin": {
+    "claude-profile": "./bin/claude-profile.js"
+  },
+  "scripts": {
+    "test": "echo \"No tests yet\" && exit 0"
+  },
+  "keywords": [
+    "claude",
+    "profile",
+    "sync",
+    "dotfiles"
+  ],
+  "author": "adrianchmxra",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^13.1.0",
+    "ignore": "^7.0.3",
+    "simple-git": "^3.27.0"
+  }
+}

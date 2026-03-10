@@ -1,0 +1,84 @@
+import path from 'node:path';
+import {
+  requireConfig,
+  getClaudeDir,
+  getProfilesDir,
+  readProfilesJson,
+  writeProfilesJson,
+} from './config.js';
+import { pullRepo, commitAndPush, forcePush } from './git.js';
+import { copyProfile, diffProfile, loadProfileIgnore } from './fs.js';
+
+/**
+ * Push current ~/.claude state to the active profile in the sync repo.
+ *
+ * @param {object} options - { force: boolean, dryRun: boolean }
+ */
+export async function push(options = {}) {
+  const config = requireConfig();
+  const profileName = config.activeProfile;
+  if (!profileName) {
+    throw new Error('No active profile set. Run "claude-profile init" first.');
+  }
+
+  const claudeDir = getClaudeDir();
+  const profileDir = path.join(getProfilesDir(config), profileName);
+  const ig = loadProfileIgnore(config);
+
+  // Show what would change
+  const diff = diffProfile(claudeDir, profileDir, ig);
+
+  if (options.dryRun) {
+    console.log(`Dry run for profile "${profileName}":`);
+    if (!diff.changed) {
+      console.log('  No changes to push.');
+    } else {
+      console.log(`  ${diff.summary}`);
+      if (diff.added.length > 0) {
+        console.log('  New files:');
+        for (const f of diff.added) console.log(`    + ${f}`);
+      }
+      if (diff.modified.length > 0) {
+        console.log('  Modified files:');
+        for (const f of diff.modified) console.log(`    ~ ${f}`);
+      }
+    }
+    return;
+  }
+
+  if (!diff.changed) {
+    console.log(`Profile "${profileName}" is already up to date.`);
+    return;
+  }
+
+  // Pull latest first (unless --force)
+  if (!options.force) {
+    console.log('Pulling latest remote state...');
+    await pullRepo(config);
+  }
+
+  // Copy ~/.claude into profile directory
+  console.log(`Copying ~/.claude to profile "${profileName}"... (${diff.summary})`);
+  const count = copyProfile(claudeDir, profileDir, ig);
+  console.log(`Copied ${count} files.`);
+
+  // Update profiles.json timestamp
+  const profilesData = readProfilesJson(config);
+  const profileEntry = profilesData.profiles.find((p) => p.name === profileName);
+  if (profileEntry) {
+    profileEntry.lastPushedAt = new Date().toISOString();
+    writeProfilesJson(config, profilesData);
+  }
+
+  // Commit and push
+  const commitMsg = `push: ${profileName} from ${config.deviceId} (${diff.summary})`;
+  console.log('Pushing to remote...');
+
+  if (options.force) {
+    await forcePush(config, commitMsg);
+  } else {
+    await commitAndPush(config, commitMsg);
+  }
+
+  console.log(`Profile "${profileName}" pushed successfully.`);
+}

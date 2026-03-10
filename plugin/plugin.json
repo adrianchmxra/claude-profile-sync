@@ -1,0 +1,23 @@
+{
+  "name": "claude-profile",
+  "description": "Sync ~/.claude profiles across devices. Use /profile to manage profiles.",
+  "version": "1.0.0",
+  "commands": [
+    {
+      "name": "/profile",
+      "description": "Manage claude profiles: /profile list|switch|push|pull|new|delete|status",
+      "arguments": [
+        {
+          "name": "subcommand",
+          "description": "The subcommand to run (list, switch, push, pull, new, delete, status)",
+          "required": true
+        },
+        {
+          "name": "args",
+          "description": "Additional arguments for the subcommand (e.g. profile name for switch/new/delete)",
+          "required": false
+        }
+      ]
+    }
+  ]
+}
