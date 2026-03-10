@@ -1,6 +1,8 @@
-# claude-profile
+# claude-profile-sync
 
-Sync your `~/.claude` directory across devices via a private GitHub repo.
+Developers often work across multiple machines — a home PC, a work laptop, maybe a client-provided device. Every time you switch, your Claude Code setup (global instructions, custom agents, rules, plugins, settings) is different or missing entirely. There's no built-in way to keep `~/.claude` in sync across devices.
+
+claude-profile-sync solves this by using a private GitHub repository as the backend. Each device gets a named profile, and switching between them is a single command. Your current state is always snapshot before a switch, so nothing gets lost.
 
 ## Quick start
 
