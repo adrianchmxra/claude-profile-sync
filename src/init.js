@@ -1,4 +1,5 @@
 import readline from 'node:readline';
+import { execSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -27,6 +28,50 @@ function ask(rl, question, defaultValue) {
 }
 
 /**
+ * Check if gh CLI is installed and authenticated.
+ * Returns the auth token if available, null otherwise.
+ */
+function getGhToken() {
+  try {
+    const token = execSync('gh auth token', { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+    return token || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Get the authenticated GitHub username via gh CLI.
+ */
+function getGhUsername() {
+  try {
+    return execSync('gh api user --jq .login', { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Create a private GitHub repo via gh CLI. Returns the HTTPS URL.
+ */
+function createRepoWithGh(repoName) {
+  try {
+    const url = execSync(`gh repo create ${repoName} --private --confirm`, {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    return url;
+  } catch (err) {
+    const msg = err.stderr || err.message || '';
+    if (msg.includes('already exists')) {
+      const username = getGhUsername();
+      return `https://github.com/${username}/${repoName}`;
+    }
+    throw new Error(`Failed to create repo: ${msg.split('\n')[0]}`);
+  }
+}
+
+/**
  * Initialize claude-profile: interactive setup wizard.
  */
 export async function init() {
@@ -47,31 +92,82 @@ export async function init() {
 
   try {
     console.log('');
-    console.log('claude-profile setup');
-    console.log('====================');
+    console.log('claude-profile-sync setup');
+    console.log('========================');
     console.log('');
     console.log(
       'This tool syncs your ~/.claude directory across devices via a private GitHub repo.'
     );
-    console.log(
-      'You need a private GitHub repo (e.g. "claude-profiles") and a GitHub PAT with repo access.'
-    );
     console.log('');
 
-    const repoUrl = await ask(
-      rl,
-      'GitHub repo URL (e.g. https://github.com/you/claude-profiles)',
-      ''
-    );
-    if (!repoUrl) {
-      console.error('Error: Repo URL is required.');
-      return;
-    }
+    // Detect gh CLI
+    const ghToken = getGhToken();
+    let repoUrl;
+    let token;
 
-    const token = await ask(rl, 'GitHub Personal Access Token (PAT)', '');
-    if (!token) {
-      console.error('Error: GitHub PAT is required.');
-      return;
+    if (ghToken) {
+      console.log('GitHub CLI detected and authenticated.');
+      const authMethod = await ask(
+        rl,
+        'Auth method: (1) Use gh CLI  (2) Enter PAT manually',
+        '1'
+      );
+
+      if (authMethod === '1') {
+        token = ghToken;
+        const username = getGhUsername();
+        console.log(`Logged in as: ${username}`);
+        console.log('');
+
+        const repoChoice = await ask(
+          rl,
+          'Repo: (1) Create new "claude-profiles" repo  (2) Use existing repo URL',
+          '1'
+        );
+
+        if (repoChoice === '1') {
+          const repoName = await ask(rl, 'Repo name', 'claude-profiles');
+          console.log(`Creating private repo ${username}/${repoName}...`);
+          repoUrl = createRepoWithGh(repoName);
+          console.log(`Repo ready: ${repoUrl}`);
+        } else {
+          repoUrl = await ask(rl, 'GitHub repo URL', '');
+          if (!repoUrl) {
+            console.error('Error: Repo URL is required.');
+            return;
+          }
+        }
+      } else {
+        repoUrl = await ask(rl, 'GitHub repo URL (e.g. https://github.com/you/claude-profiles)', '');
+        if (!repoUrl) {
+          console.error('Error: Repo URL is required.');
+          return;
+        }
+        token = await ask(rl, 'GitHub Personal Access Token (PAT)', '');
+        if (!token) {
+          console.error('Error: GitHub PAT is required.');
+          return;
+        }
+      }
+    } else {
+      console.log(
+        'Tip: Install the GitHub CLI (gh) to skip PAT setup. See https://cli.github.com'
+      );
+      console.log('');
+      repoUrl = await ask(
+        rl,
+        'GitHub repo URL (e.g. https://github.com/you/claude-profiles)',
+        ''
+      );
+      if (!repoUrl) {
+        console.error('Error: Repo URL is required.');
+        return;
+      }
+      token = await ask(rl, 'GitHub Personal Access Token (PAT)', '');
+      if (!token) {
+        console.error('Error: GitHub PAT is required.');
+        return;
+      }
     }
 
     const defaultDevice = `${os.hostname()}-${process.platform}`;

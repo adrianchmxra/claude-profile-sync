@@ -1,8 +1,14 @@
 # claude-profile-sync
 
-Developers often work across multiple machines — a home PC, a work laptop, maybe a client-provided device. Every time you switch, your Claude Code setup (global instructions, custom agents, rules, plugins, settings) is different or missing entirely. There's no built-in way to keep `~/.claude` in sync across devices.
+Developers often work across multiple machines: a home PC, a work laptop, maybe a client-provided device. Every time you switch, your Claude Code setup (global instructions, custom agents, rules, plugins, settings) is different or missing entirely. There's no built-in way to keep `~/.claude` in sync across devices.
 
 claude-profile-sync solves this by using a private GitHub repository as the backend. Each device gets a named profile, and switching between them is a single command. Your current state is always snapshot before a switch, so nothing gets lost.
+
+## Prerequisites
+
+- **Node.js** >= 18
+- **Git** on PATH
+- **GitHub CLI** (`gh`): recommended, makes setup instant. Or a GitHub PAT with `repo` scope.
 
 ## Quick start
 
@@ -14,10 +20,12 @@ npm install -g claude-profile
 claude-profile init
 ```
 
-The init wizard will ask for:
-- A private GitHub repo URL (e.g. `https://github.com/you/claude-profiles`)
-- A GitHub Personal Access Token (PAT) with `repo` scope
-- A device name and profile name
+If you have the [GitHub CLI](https://cli.github.com) installed and authenticated, init will:
+1. Detect your `gh` auth automatically (no PAT needed)
+2. Offer to create the `claude-profiles` repo for you
+3. Set up your first profile from your current `~/.claude`
+
+Without `gh`, the wizard will ask for a repo URL and PAT manually.
 
 ## Commands
 
@@ -54,9 +62,27 @@ Everything inside `~/.claude/` **except**:
 - `.git/`
 - Patterns in `.profileignore`
 
+### .profileignore
+
+Add patterns to `.profileignore` in your sync repo to exclude additional files (uses gitignore syntax):
+
+```
+*.log
+tmp/
+*.bak
+```
+
 ### Switch atomicity
 
 When switching profiles, your current state is snapshot and pushed to remote **before** overwriting `~/.claude`. If the push fails, `~/.claude` is not modified.
+
+### Conflict handling
+
+If two devices push without pulling first, the push will be rejected. You'll be prompted to:
+- `--force`: overwrite remote with your local state
+- Run `claude-profile pull` first to get the latest, then push again
+
+No automatic merging: profiles are treated as opaque snapshots.
 
 ## Claude Code plugin
 
@@ -77,7 +103,7 @@ Stored at `~/.claude-profile/config.json` (permissions: 600 on Unix):
 ```json
 {
   "repoUrl": "https://github.com/you/claude-profiles",
-  "token": "<GitHub PAT>",
+  "token": "<GitHub PAT or gh auth token>",
   "deviceId": "home-desktop-win32",
   "activeProfile": "home-pc",
   "clonePath": "~/.claude-profile/repo"
