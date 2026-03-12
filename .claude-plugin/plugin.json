@@ -1,0 +1,5 @@
+{
+  "name": "claude-profile-sync",
+  "description": "Sync your Claude Code setup across devices using named profiles",
+  "version": "1.0.0"
+}

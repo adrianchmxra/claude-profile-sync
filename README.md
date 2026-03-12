@@ -13,8 +13,14 @@ claude-profile-sync solves this by using a private GitHub repository as the back
 ## Quick start
 
 ```bash
-# Install globally
-npm install -g claude-profile
+# Install from GitHub
+npm install -g git+https://github.com/adrianchmxra/claude-profile-sync.git
+
+# Or clone and link locally
+git clone https://github.com/adrianchmxra/claude-profile-sync.git
+cd claude-profile-sync
+npm install
+npm link
 
 # First-time setup
 claude-profile init
@@ -86,14 +92,24 @@ No automatic merging: profiles are treated as opaque snapshots.
 
 ## Claude Code plugin
 
-Install as a Claude Code plugin to use `/profile` slash commands:
+Load as a plugin to get the `/profile` slash command inside Claude Code:
+
+```bash
+# Load during a session
+claude --plugin-dir /path/to/claude-profile-sync
+
+# Or install permanently (once published)
+/plugin install claude-profile-sync
+```
+
+Then use inside Claude Code:
 
 ```
-/profile list
-/profile switch work-laptop
-/profile push
-/profile pull
-/profile status
+/claude-profile-sync:profile list
+/claude-profile-sync:profile switch work-laptop
+/claude-profile-sync:profile push
+/claude-profile-sync:profile pull
+/claude-profile-sync:profile status
 ```
 
 ## Configuration
