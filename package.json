@@ -11,12 +11,21 @@
   },
   "keywords": [
     "claude",
+    "claude-code",
     "profile",
     "sync",
-    "dotfiles"
+    "dotfiles",
+    "cli"
   ],
   "author": "adrianchmxra",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/adrianchmxra/claude-profile-sync"
+  },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "commander": "^13.1.0",
     "ignore": "^7.0.3",
