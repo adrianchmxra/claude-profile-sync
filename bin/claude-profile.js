@@ -36,9 +36,9 @@ program
   .action(wrapAction((opts) => pull({ dryRun: opts.dryRun })));
 
 program
-  .command('switch <name>')
+  .command('switch <name...>')
   .description('Switch to a different profile (atomic snapshot + swap)')
-  .action(wrapAction((name) => switchProfile(name)));
+  .action(wrapAction((parts) => switchProfile(parts.join(' '))));
 
 program
   .command('list')
@@ -46,15 +46,15 @@ program
   .action(wrapAction(list));
 
 program
-  .command('new <name>')
+  .command('new <name...>')
   .description('Create a new profile from current ~/.claude')
-  .action(wrapAction((name) => newProfile(name)));
+  .action(wrapAction((parts) => newProfile(parts.join(' '))));
 
 program
-  .command('delete <name>')
+  .command('delete <name...>')
   .description('Delete a profile')
   .option('--yes', 'Skip confirmation prompt')
-  .action(wrapAction((name, opts) => deleteProfile(name, { yes: opts.yes })));
+  .action(wrapAction((parts, opts) => deleteProfile(parts.join(' '), { yes: opts.yes })));
 
 program
   .command('status')
