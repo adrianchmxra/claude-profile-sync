@@ -54,6 +54,12 @@ export async function status() {
       if (diff.modified.length > 10)
         console.log(`      ... and ${diff.modified.length - 10} more`);
     }
+    if (diff.deleted.length > 0) {
+      console.log(`    Deleted files (${diff.deleted.length}):`);
+      for (const f of diff.deleted.slice(0, 10)) console.log(`      - ${f}`);
+      if (diff.deleted.length > 10)
+        console.log(`      ... and ${diff.deleted.length - 10} more`);
+    }
   } else {
     console.log('  Local changes:  none (in sync)');
   }

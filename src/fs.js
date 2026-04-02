@@ -79,16 +79,19 @@ export function getSyncableFiles(dir, ig) {
 }
 
 /**
- * Copy syncable files from srcDir to destDir.
- * Only copies files not excluded by .profileignore + hardcoded exclusions.
- * Does NOT delete files in destDir that aren't in srcDir (additive copy).
+ * Sync files from srcDir to destDir (true sync).
+ * Copies all syncable files from source, then deletes any syncable files
+ * in destDir that don't exist in srcDir. Cleans up empty directories after.
  */
 export function copyProfile(srcDir, destDir, ig) {
-  const files = getSyncableFiles(srcDir, ig);
+  const srcFiles = getSyncableFiles(srcDir, ig);
+  const srcFileSet = new Set(srcFiles);
   let copied = 0;
+  let deleted = 0;
   const failed = [];
 
-  for (const relFile of files) {
+  // Copy all source files to destination
+  for (const relFile of srcFiles) {
     const srcFile = path.join(srcDir, relFile);
     const destFile = path.join(destDir, relFile);
 
@@ -109,29 +112,79 @@ export function copyProfile(srcDir, destDir, ig) {
   if (failed.length > 0) {
     const failList = failed.map((f) => `  ${f.file}: ${f.error}`).join('\n');
     throw new Error(
-      `Failed to copy ${failed.length} of ${files.length} files:\n${failList}`
+      `Failed to copy ${failed.length} of ${srcFiles.length} files:\n${failList}`
     );
   }
 
-  return copied;
+  // Delete syncable files in destination that don't exist in source
+  const destFiles = getSyncableFiles(destDir, ig);
+  for (const relFile of destFiles) {
+    if (!srcFileSet.has(relFile)) {
+      try {
+        fs.unlinkSync(path.join(destDir, relFile));
+        deleted++;
+      } catch {
+        // Ignore deletion errors for files that may already be gone
+      }
+    }
+  }
+
+  // Clean up empty directories left behind
+  removeEmptyDirs(destDir);
+
+  return { copied, deleted };
+}
+
+/**
+ * Recursively remove empty directories under baseDir.
+ * Walks bottom-up so nested empty dirs are cleaned properly.
+ */
+function removeEmptyDirs(baseDir) {
+  if (!fs.existsSync(baseDir)) return;
+
+  let entries;
+  try {
+    entries = fs.readdirSync(baseDir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      const fullPath = path.join(baseDir, entry.name);
+      removeEmptyDirs(fullPath);
+      // After cleaning children, remove if now empty
+      try {
+        const remaining = fs.readdirSync(fullPath);
+        if (remaining.length === 0) {
+          fs.rmdirSync(fullPath);
+        }
+      } catch {
+        // Ignore errors
+      }
+    }
+  }
 }
 
 /**
  * Check if there are differences between srcDir and destDir for syncable files.
- * Returns an object: { changed: boolean, added: string[], modified: string[], summary: string }
+ * Returns an object: { changed, added, modified, deleted, summary }
  */
 export function diffProfile(srcDir, destDir, ig) {
   const srcFiles = getSyncableFiles(srcDir, ig);
-  const destFiles = new Set(getSyncableFiles(destDir, ig));
+  const srcFileSet = new Set(srcFiles);
+  const destFiles = getSyncableFiles(destDir, ig);
+  const destFileSet = new Set(destFiles);
 
   const added = [];
   const modified = [];
+  const deleted = [];
 
   for (const relFile of srcFiles) {
     const srcFile = path.join(srcDir, relFile);
     const destFile = path.join(destDir, relFile);
 
-    if (!destFiles.has(relFile)) {
+    if (!destFileSet.has(relFile)) {
       added.push(relFile);
       continue;
     }
@@ -148,13 +201,21 @@ export function diffProfile(srcDir, destDir, ig) {
     }
   }
 
-  const changed = added.length > 0 || modified.length > 0;
+  // Files in destination that don't exist in source
+  for (const relFile of destFiles) {
+    if (!srcFileSet.has(relFile)) {
+      deleted.push(relFile);
+    }
+  }
+
+  const changed = added.length > 0 || modified.length > 0 || deleted.length > 0;
   const parts = [];
   if (added.length > 0) parts.push(`${added.length} new`);
   if (modified.length > 0) parts.push(`${modified.length} modified`);
+  if (deleted.length > 0) parts.push(`${deleted.length} deleted`);
   const summary = changed ? parts.join(', ') : 'no changes';
 
-  return { changed, added, modified, summary };
+  return { changed, added, modified, deleted, summary };
 }
 
 /**

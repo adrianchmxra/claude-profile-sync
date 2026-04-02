@@ -136,8 +136,10 @@ async function _doSwitch(config, currentName, targetName) {
 
     // Step 4: Copy target profile to ~/.claude
     console.log(`Step 4/7: Applying profile "${targetName}" to ~/.claude...`);
-    const count = copyProfile(targetProfileDir, claudeDir, ig);
-    console.log(`Copied ${count} files.`);
+    const result = copyProfile(targetProfileDir, claudeDir, ig);
+    const parts = [`Copied ${result.copied} files`];
+    if (result.deleted > 0) parts.push(`deleted ${result.deleted} stale files`);
+    console.log(`${parts.join(', ')}.`);
   } catch (err) {
     // Rollback: restore from backup
     console.error(`Failed to apply profile: ${err.message}`);

@@ -54,6 +54,10 @@ async function _doPush(config, profileName, options) {
         console.log('  Modified files:');
         for (const f of diff.modified) console.log(`    ~ ${f}`);
       }
+      if (diff.deleted.length > 0) {
+        console.log('  Deleted files:');
+        for (const f of diff.deleted) console.log(`    - ${f}`);
+      }
     }
     return;
   }
@@ -71,8 +75,10 @@ async function _doPush(config, profileName, options) {
 
   // Copy ~/.claude into profile directory
   console.log(`Copying ~/.claude to profile "${profileName}"... (${diff.summary})`);
-  const count = copyProfile(claudeDir, profileDir, ig);
-  console.log(`Copied ${count} files.`);
+  const result = copyProfile(claudeDir, profileDir, ig);
+  const parts = [`Copied ${result.copied} files`];
+  if (result.deleted > 0) parts.push(`deleted ${result.deleted} stale files`);
+  console.log(`${parts.join(', ')}.`);
 
   // Update profiles.json timestamp
   const profilesData = readProfilesJson(config);

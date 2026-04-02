@@ -69,6 +69,10 @@ async function _doPull(config, profileName, options) {
         console.log('  Modified files:');
         for (const f of diff.modified) console.log(`    ~ ${f}`);
       }
+      if (diff.deleted.length > 0) {
+        console.log('  Deleted files:');
+        for (const f of diff.deleted) console.log(`    - ${f}`);
+      }
     }
     return;
   }
@@ -78,9 +82,11 @@ async function _doPull(config, profileName, options) {
     return;
   }
 
-  // Copy profile directory to ~/.claude (additive — no deletion)
+  // Sync profile directory to ~/.claude (true sync with deletion of stale files)
   console.log(`Restoring profile "${profileName}" to ~/.claude... (${diff.summary})`);
-  const count = copyProfile(profileDir, claudeDir, ig);
-  console.log(`Copied ${count} files.`);
+  const result = copyProfile(profileDir, claudeDir, ig);
+  const parts = [`Copied ${result.copied} files`];
+  if (result.deleted > 0) parts.push(`deleted ${result.deleted} stale files`);
+  console.log(`${parts.join(', ')}.`);
   console.log(`Profile "${profileName}" restored successfully.`);
 }
