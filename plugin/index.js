@@ -1,4 +1,4 @@
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -43,25 +43,22 @@ export default function plugin(params) {
     };
   }
 
-  // Build the command
-  const cmdParts = ['node', JSON.stringify(CLI_PATH), subcommand];
+  // Build the argument list (no shell involved)
+  const cmdArgs = [CLI_PATH, subcommand];
   if (args) {
-    // Split args string and add each part
     const argParts = args.trim().split(/\s+/);
     for (const part of argParts) {
-      cmdParts.push(part);
+      cmdArgs.push(part);
     }
   }
 
   // For delete, always pass --yes in plugin context (no interactive prompt)
   if (subcommand === 'delete' && !args?.includes('--yes')) {
-    cmdParts.push('--yes');
+    cmdArgs.push('--yes');
   }
 
-  const cmd = cmdParts.join(' ');
-
   try {
-    const output = execSync(cmd, {
+    const output = execFileSync('node', cmdArgs, {
       encoding: 'utf-8',
       timeout: 30000,
       stdio: ['pipe', 'pipe', 'pipe'],

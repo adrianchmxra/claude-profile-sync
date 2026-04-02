@@ -1,11 +1,14 @@
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import {
   requireConfig,
   saveConfig,
   getClaudeDir,
   getProfilesDir,
   readProfilesJson,
+  validateProfileName,
+  acquireLock,
 } from './config.js';
 import { pullRepo, commitAndPush } from './git.js';
 import { copyProfile, diffProfile, loadProfileIgnore } from './fs.js';
@@ -35,12 +38,14 @@ import { requireNoActiveSessions } from './session.js';
  * @param {string} targetName - The profile to switch to
  */
 export async function switchProfile(targetName) {
-  const config = requireConfig();
-  const currentName = config.activeProfile;
-
   if (!targetName) {
     throw new Error('Usage: claude-profile switch <profile-name>');
   }
+
+  validateProfileName(targetName);
+
+  const config = requireConfig();
+  const currentName = config.activeProfile;
 
   if (targetName === currentName) {
     console.log(`Already on profile "${targetName}".`);
@@ -60,6 +65,15 @@ export async function switchProfile(targetName) {
   // Block if Claude Code is running to prevent config corruption
   requireNoActiveSessions();
 
+  const releaseLock = acquireLock('switch');
+  try {
+    await _doSwitch(config, currentName, targetName);
+  } finally {
+    releaseLock();
+  }
+}
+
+async function _doSwitch(config, currentName, targetName) {
   const claudeDir = getClaudeDir();
   const profilesDir = getProfilesDir(config);
   const currentProfileDir = path.join(profilesDir, currentName);
@@ -112,11 +126,34 @@ export async function switchProfile(targetName) {
 
   // === POINT OF NO RETURN ===
   // Snapshot is safely on remote. Now overwrite ~/.claude.
+  // Create a backup of ~/.claude so we can rollback if the copy fails.
+  const backupDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-profile-backup-'));
 
-  // Step 4: Copy target profile to ~/.claude
-  console.log(`Step 4/7: Applying profile "${targetName}" to ~/.claude...`);
-  const count = copyProfile(targetProfileDir, claudeDir, ig);
-  console.log(`Copied ${count} files.`);
+  try {
+    // Backup current syncable files from ~/.claude
+    console.log('Creating backup of ~/.claude...');
+    copyProfile(claudeDir, backupDir, ig);
+
+    // Step 4: Copy target profile to ~/.claude
+    console.log(`Step 4/7: Applying profile "${targetName}" to ~/.claude...`);
+    const count = copyProfile(targetProfileDir, claudeDir, ig);
+    console.log(`Copied ${count} files.`);
+  } catch (err) {
+    // Rollback: restore from backup
+    console.error(`Failed to apply profile: ${err.message}`);
+    console.log('Rolling back ~/.claude from backup...');
+    try {
+      copyProfile(backupDir, claudeDir, ig);
+      console.log('Rollback successful. ~/.claude restored to previous state.');
+    } catch (rollbackErr) {
+      console.error(`CRITICAL: Rollback also failed: ${rollbackErr.message}`);
+      console.error(`Manual recovery: backup is at ${backupDir}`);
+      throw new Error(
+        `Failed to apply profile and rollback failed. Backup at: ${backupDir}`
+      );
+    }
+    throw err;
+  }
 
   // Step 5: Update local config
   console.log('Step 5/7: Updating local config...');
@@ -136,6 +173,13 @@ export async function switchProfile(targetName) {
       `Warning: Switch completed locally but failed to push record: ${err.message}`
     );
     console.log('Run "claude-profile push" to sync the switch record later.');
+  }
+
+  // Clean up backup
+  try {
+    fs.rmSync(backupDir, { recursive: true, force: true });
+  } catch {
+    // Ignore cleanup errors
   }
 
   console.log('');

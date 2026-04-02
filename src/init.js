@@ -1,5 +1,5 @@
 import readline from 'node:readline';
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -11,6 +11,7 @@ import {
   writeProfilesJson,
   readProfilesJson,
   getClaudeDir,
+  validateProfileName,
 } from './config.js';
 import { cloneRepo, commitAndPush } from './git.js';
 import { copyProfile, loadProfileIgnore } from './fs.js';
@@ -56,7 +57,7 @@ function getGhUsername() {
  */
 function createRepoWithGh(repoName) {
   try {
-    const url = execSync(`gh repo create ${repoName} --private --confirm`, {
+    const url = execFileSync('gh', ['repo', 'create', repoName, '--private', '--confirm'], {
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
@@ -175,6 +176,7 @@ export async function init() {
 
     const defaultProfile = deviceId.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
     const profileName = await ask(rl, 'Profile name for this device', defaultProfile);
+    validateProfileName(profileName);
 
     rl.close();
 
