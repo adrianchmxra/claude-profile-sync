@@ -7,6 +7,7 @@ import {
 } from './config.js';
 import { pullRepo } from './git.js';
 import { copyProfile, diffProfile, loadProfileIgnore } from './fs.js';
+import { requireNoActiveSessions } from './session.js';
 
 /**
  * Pull the active profile from the sync repo and copy it to ~/.claude.
@@ -19,6 +20,9 @@ export async function pull(options = {}) {
   if (!profileName) {
     throw new Error('No active profile set. Run "claude-profile init" first.');
   }
+
+  // Block if Claude Code is running to prevent config corruption
+  requireNoActiveSessions();
 
   // Pull latest from remote
   console.log('Pulling latest from remote...');
