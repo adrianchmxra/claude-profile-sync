@@ -47,8 +47,8 @@ export async function newProfile(name) {
   if (fs.existsSync(claudeDir)) {
     console.log(`Copying current ~/.claude to new profile "${name}"...`);
     const ig = loadProfileIgnore(config);
-    const count = copyProfile(claudeDir, profileDir, ig);
-    console.log(`Copied ${count} files.`);
+    const result = copyProfile(claudeDir, profileDir, ig);
+    console.log(`Copied ${result.copied} files.`);
   }
 
   // Update profiles.json
