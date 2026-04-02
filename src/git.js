@@ -63,7 +63,7 @@ export async function cloneRepo(config) {
       // Create initial branch
       await git.checkoutLocalBranch('main');
     } else {
-      throw new Error(`Failed to clone repo: ${friendlyError(err)}`);
+      throw new Error(`Failed to clone repo: ${friendlyError(err, config)}`);
     }
   }
 }
@@ -84,7 +84,7 @@ export async function pullRepo(config) {
     ) {
       return true;
     }
-    throw new Error(`Failed to pull: ${friendlyError(err)}`);
+    throw new Error(`Failed to pull: ${friendlyError(err, config)}`);
   }
 }
 
@@ -125,7 +125,7 @@ export async function commitAndPush(config, message) {
           'Run "claude-profile pull" first, or use --force to overwrite.'
       );
     }
-    throw new Error(`Push failed: ${friendlyError(err)}`);
+    throw new Error(`Push failed: ${friendlyError(err, config)}`);
   }
 
   return true;
@@ -171,10 +171,23 @@ export async function getRepoStatus(config) {
 }
 
 /**
+ * Strip tokens from error messages to prevent credential leakage.
+ * Replaces any occurrence of the token in URLs with '***'.
+ */
+function sanitizeError(message, config) {
+  if (!message) return message;
+  if (!config?.token) return message;
+  // Replace the token wherever it appears (URL-encoded or plain)
+  const escaped = config.token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return message.replace(new RegExp(escaped, 'g'), '***');
+}
+
+/**
  * Convert git errors into human-readable messages.
  */
-function friendlyError(err) {
-  const msg = err.message || String(err);
+function friendlyError(err, config) {
+  let msg = err.message || String(err);
+  msg = sanitizeError(msg, config);
   if (msg.includes('Authentication failed') || msg.includes('401')) {
     return 'Authentication failed. Check your GitHub PAT.';
   }

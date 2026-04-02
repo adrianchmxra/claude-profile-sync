@@ -6,6 +6,8 @@ import {
   getProfilesDir,
   readProfilesJson,
   writeProfilesJson,
+  validateProfileName,
+  acquireLock,
 } from './config.js';
 import { pullRepo, commitAndPush } from './git.js';
 
@@ -19,6 +21,7 @@ export async function deleteProfile(name, options = {}) {
   if (!name) {
     throw new Error('Usage: claude-profile delete <name>');
   }
+  validateProfileName(name);
 
   const config = requireConfig();
 
@@ -50,24 +53,29 @@ export async function deleteProfile(name, options = {}) {
     }
   }
 
-  // Remove profile directory
-  const profileDir = path.join(getProfilesDir(config), name);
-  if (fs.existsSync(profileDir)) {
-    fs.rmSync(profileDir, { recursive: true, force: true });
+  const releaseLock = acquireLock('delete');
+  try {
+    // Remove profile directory
+    const profileDir = path.join(getProfilesDir(config), name);
+    if (fs.existsSync(profileDir)) {
+      fs.rmSync(profileDir, { recursive: true, force: true });
+    }
+
+    // Update profiles.json
+    profilesData.profiles.splice(profileIndex, 1);
+    writeProfilesJson(config, profilesData);
+
+    // Commit and push
+    console.log(`Deleting profile "${name}"...`);
+    await commitAndPush(
+      config,
+      `delete: remove profile "${name}" from ${config.deviceId}`
+    );
+
+    console.log(`Profile "${name}" deleted.`);
+  } finally {
+    releaseLock();
   }
-
-  // Update profiles.json
-  profilesData.profiles.splice(profileIndex, 1);
-  writeProfilesJson(config, profilesData);
-
-  // Commit and push
-  console.log(`Deleting profile "${name}"...`);
-  await commitAndPush(
-    config,
-    `delete: remove profile "${name}" from ${config.deviceId}`
-  );
-
-  console.log(`Profile "${name}" deleted.`);
 }
 
 /**

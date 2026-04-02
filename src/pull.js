@@ -4,6 +4,8 @@ import {
   requireConfig,
   getClaudeDir,
   getProfilesDir,
+  validateProfileName,
+  acquireLock,
 } from './config.js';
 import { pullRepo } from './git.js';
 import { copyProfile, diffProfile, loadProfileIgnore } from './fs.js';
@@ -20,10 +22,20 @@ export async function pull(options = {}) {
   if (!profileName) {
     throw new Error('No active profile set. Run "claude-profile init" first.');
   }
+  validateProfileName(profileName);
 
   // Block if Claude Code is running to prevent config corruption
   requireNoActiveSessions();
 
+  const releaseLock = acquireLock('pull');
+  try {
+    await _doPull(config, profileName, options);
+  } finally {
+    releaseLock();
+  }
+}
+
+async function _doPull(config, profileName, options) {
   // Pull latest from remote
   console.log('Pulling latest from remote...');
   await pullRepo(config);

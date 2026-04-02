@@ -6,6 +6,7 @@ import {
   readProfilesJson,
   writeProfilesJson,
   getClaudeDir,
+  validateProfileName,
 } from './config.js';
 import { pullRepo, commitAndPush } from './git.js';
 import { copyProfile, loadProfileIgnore } from './fs.js';
@@ -20,12 +21,8 @@ export async function newProfile(name) {
     throw new Error('Usage: claude-profile new <name>');
   }
 
-  // Validate name: alphanumeric, dashes, underscores
-  if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
-    throw new Error(
-      'Profile name can only contain letters, numbers, dashes, and underscores.'
-    );
-  }
+  // Validate name: alphanumeric, spaces, dashes, underscores (no path traversal)
+  validateProfileName(name);
 
   const config = requireConfig();
 

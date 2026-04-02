@@ -5,6 +5,8 @@ import {
   getProfilesDir,
   readProfilesJson,
   writeProfilesJson,
+  validateProfileName,
+  acquireLock,
 } from './config.js';
 import { pullRepo, commitAndPush, forcePush } from './git.js';
 import { copyProfile, diffProfile, loadProfileIgnore } from './fs.js';
@@ -20,7 +22,17 @@ export async function push(options = {}) {
   if (!profileName) {
     throw new Error('No active profile set. Run "claude-profile init" first.');
   }
+  validateProfileName(profileName);
 
+  const releaseLock = acquireLock('push');
+  try {
+    await _doPush(config, profileName, options);
+  } finally {
+    releaseLock();
+  }
+}
+
+async function _doPush(config, profileName, options) {
   const claudeDir = getClaudeDir();
   const profileDir = path.join(getProfilesDir(config), profileName);
   const ig = loadProfileIgnore(config);

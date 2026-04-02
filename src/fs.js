@@ -85,6 +85,8 @@ export function getSyncableFiles(dir, ig) {
  */
 export function copyProfile(srcDir, destDir, ig) {
   const files = getSyncableFiles(srcDir, ig);
+  let copied = 0;
+  const failed = [];
 
   for (const relFile of files) {
     const srcFile = path.join(srcDir, relFile);
@@ -96,10 +98,22 @@ export function copyProfile(srcDir, destDir, ig) {
       fs.mkdirSync(destParent, { recursive: true });
     }
 
-    fs.copyFileSync(srcFile, destFile);
+    try {
+      fs.copyFileSync(srcFile, destFile);
+      copied++;
+    } catch (err) {
+      failed.push({ file: relFile, error: err.message });
+    }
   }
 
-  return files.length;
+  if (failed.length > 0) {
+    const failList = failed.map((f) => `  ${f.file}: ${f.error}`).join('\n');
+    throw new Error(
+      `Failed to copy ${failed.length} of ${files.length} files:\n${failList}`
+    );
+  }
+
+  return copied;
 }
 
 /**
