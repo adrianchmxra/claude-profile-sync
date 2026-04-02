@@ -25,6 +25,7 @@ export const ALWAYS_EXCLUDED = [
   'teams',
   'tasks',
   'memory',
+  'sessions',
   '.git',
 ];
 

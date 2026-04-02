@@ -9,6 +9,7 @@ import {
 } from './config.js';
 import { pullRepo, commitAndPush } from './git.js';
 import { copyProfile, diffProfile, loadProfileIgnore } from './fs.js';
+import { requireNoActiveSessions } from './session.js';
 
 /**
  * Switch to a different profile.
@@ -55,6 +56,9 @@ export async function switchProfile(targetName) {
       `Profile "${targetName}" not found. Available profiles: ${available || '(none)'}`
     );
   }
+
+  // Block if Claude Code is running to prevent config corruption
+  requireNoActiveSessions();
 
   const claudeDir = getClaudeDir();
   const profilesDir = getProfilesDir(config);
