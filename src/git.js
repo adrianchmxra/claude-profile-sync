@@ -1,10 +1,42 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { execSync } from 'node:child_process';
 import { simpleGit } from 'simple-git';
 import { getClonePath } from './config.js';
 
 /**
- * Inject a GitHub PAT into an HTTPS repo URL for authentication.
+ * Resolve a GitHub auth token at runtime.
+ *
+ * Order of precedence:
+ *   1. GH_TOKEN / GITHUB_TOKEN environment variables (CI, scripted use)
+ *   2. `gh auth token` from the local GitHub CLI
+ *
+ * The token is intentionally NOT cached on disk — fetching it fresh each
+ * time means rotating the gh CLI session automatically rotates the token
+ * used here, and there is only ever one copy of the secret on disk
+ * (managed by gh, ideally in the OS keychain).
+ */
+export function getRuntimeToken() {
+  const envToken = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
+  if (envToken && envToken.trim()) return envToken.trim();
+  try {
+    const token = execSync('gh auth token', {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    if (token) return token;
+  } catch {
+    // fall through to error
+  }
+  throw new Error(
+    'Could not obtain a GitHub token. Install the GitHub CLI and run ' +
+      '"gh auth login", or set the GH_TOKEN / GITHUB_TOKEN environment ' +
+      'variable.'
+  );
+}
+
+/**
+ * Inject a GitHub token into an HTTPS repo URL for authentication.
  * Converts: https://github.com/user/repo
  *       to: https://<token>@github.com/user/repo.git
  */
@@ -21,6 +53,40 @@ function authedUrl(repoUrl, token) {
 export function getGit(config) {
   const clonePath = getClonePath(config);
   return simpleGit(clonePath);
+}
+
+/**
+ * Ensure the local clone's `origin` remote is set to the bare repo URL
+ * (no embedded token). Migrates older clones whose origin URL still
+ * contains a cached PAT, so the secret is scrubbed from `.git/config`
+ * the next time any git command runs.
+ */
+async function ensureBareOrigin(config) {
+  try {
+    const git = getGit(config);
+    const remotes = await git.getRemotes(true);
+    const origin = remotes.find((r) => r.name === 'origin');
+    if (!origin) return;
+    const fetchUrl = origin.refs?.fetch || '';
+    const bareUrl = config.repoUrl.endsWith('.git')
+      ? config.repoUrl
+      : config.repoUrl + '.git';
+    // Detect token in stored URL: anything with userinfo (a `@` between
+    // the protocol and the host) or anything that doesn't already match
+    // the bare form gets reset.
+    let stored;
+    try {
+      stored = new URL(fetchUrl);
+    } catch {
+      stored = null;
+    }
+    if (!stored || stored.username || stored.password || fetchUrl !== bareUrl) {
+      await git.remote(['set-url', 'origin', bareUrl]);
+    }
+  } catch {
+    // Best-effort: if we can't read/set the remote, the explicit URL
+    // passed to push/pull below will still work.
+  }
 }
 
 /**
@@ -46,9 +112,12 @@ export async function cloneRepo(config) {
     fs.mkdirSync(parentDir, { recursive: true });
   }
 
-  const url = authedUrl(config.repoUrl, config.token);
+  const bareUrl = config.repoUrl.endsWith('.git')
+    ? config.repoUrl
+    : config.repoUrl + '.git';
+  const authed = authedUrl(config.repoUrl, getRuntimeToken());
   try {
-    await simpleGit().clone(url, clonePath);
+    await simpleGit().clone(authed, clonePath);
   } catch (err) {
     // If the remote repo is empty, clone will fail.
     // Initialize locally and set remote instead.
@@ -59,12 +128,20 @@ export async function cloneRepo(config) {
       fs.mkdirSync(clonePath, { recursive: true });
       const git = simpleGit(clonePath);
       await git.init();
-      await git.addRemote('origin', url);
+      await git.addRemote('origin', bareUrl);
       // Create initial branch
       await git.checkoutLocalBranch('main');
-    } else {
-      throw new Error(`Failed to clone repo: ${friendlyError(err, config)}`);
+      return;
     }
+    throw new Error(`Failed to clone repo: ${friendlyError(err, config)}`);
+  }
+  // Immediately reset origin to the bare URL so the token is never
+  // persisted in .git/config.
+  try {
+    const git = simpleGit(clonePath);
+    await git.remote(['set-url', 'origin', bareUrl]);
+  } catch {
+    // best-effort
   }
 }
 
@@ -72,9 +149,10 @@ export async function cloneRepo(config) {
  * Pull latest changes from remote. Returns true if pull succeeded.
  */
 export async function pullRepo(config) {
+  await ensureBareOrigin(config);
   const git = getGit(config);
   try {
-    await git.pull('origin', 'main');
+    await git.pull(authedUrl(config.repoUrl, getRuntimeToken()), 'main');
     return true;
   } catch (err) {
     // If there's no upstream yet (first push hasn't happened), that's OK
@@ -93,7 +171,9 @@ export async function pullRepo(config) {
  * Returns true on success. Throws on non-fast-forward or network errors.
  */
 export async function commitAndPush(config, message) {
+  await ensureBareOrigin(config);
   const git = getGit(config);
+  const remoteUrl = authedUrl(config.repoUrl, getRuntimeToken());
 
   await git.add('-A');
 
@@ -102,7 +182,7 @@ export async function commitAndPush(config, message) {
   if (status.isClean()) {
     // Nothing to commit — still try to push in case there are unpushed commits
     try {
-      await git.push('origin', 'main', ['--set-upstream']);
+      await git.push(remoteUrl, 'main');
     } catch {
       // Ignore — might be nothing to push either
     }
@@ -112,7 +192,7 @@ export async function commitAndPush(config, message) {
   await git.commit(message);
 
   try {
-    await git.push('origin', 'main', ['--set-upstream']);
+    await git.push(remoteUrl, 'main');
   } catch (err) {
     const msg = err.message || '';
     if (
@@ -135,13 +215,16 @@ export async function commitAndPush(config, message) {
  * Force-push to remote (overwrites remote history).
  */
 export async function forcePush(config, message) {
+  await ensureBareOrigin(config);
   const git = getGit(config);
   await git.add('-A');
   const status = await git.status();
   if (!status.isClean()) {
     await git.commit(message);
   }
-  await git.push('origin', 'main', ['--set-upstream', '--force']);
+  await git.push(authedUrl(config.repoUrl, getRuntimeToken()), 'main', [
+    '--force',
+  ]);
   return true;
 }
 
@@ -171,15 +254,27 @@ export async function getRepoStatus(config) {
 }
 
 /**
- * Strip tokens from error messages to prevent credential leakage.
- * Replaces any occurrence of the token in URLs with '***'.
+ * Strip credentials from error messages to prevent token leakage.
+ * Handles two cases:
+ *   1. The runtime token literal appearing anywhere in the message.
+ *   2. Any `https://<userinfo>@host/...` URL — replaced with `https://***@host/...`.
  */
-function sanitizeError(message, config) {
+function sanitizeError(message /* , config */) {
   if (!message) return message;
-  if (!config?.token) return message;
-  // Replace the token wherever it appears (URL-encoded or plain)
-  const escaped = config.token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return message.replace(new RegExp(escaped, 'g'), '***');
+  let out = message;
+  // 1. Try to scrub the literal runtime token if we can fetch it.
+  try {
+    const token = getRuntimeToken();
+    if (token) {
+      const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      out = out.replace(new RegExp(escaped, 'g'), '***');
+    }
+  } catch {
+    // No token available — fall through to URL stripping.
+  }
+  // 2. Always strip any userinfo from URLs in the message.
+  out = out.replace(/(https?:\/\/)[^/@\s]+@/g, '$1***@');
+  return out;
 }
 
 /**

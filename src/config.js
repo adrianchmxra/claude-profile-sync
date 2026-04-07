@@ -10,7 +10,6 @@ const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
  */
 const DEFAULTS = {
   repoUrl: '',
-  token: '',
   deviceId: `${os.hostname()}-${process.platform}`,
   activeProfile: '',
   clonePath: path.join(CONFIG_DIR, 'repo'),
@@ -99,6 +98,11 @@ function ensureConfigDir() {
 
 /**
  * Read the local config file. Returns null if it doesn't exist.
+ *
+ * Migration: older configs cached a `token` field on disk. We drop it
+ * on read AND rewrite the file without it, so any previously-saved
+ * secret is scrubbed from disk on the next CLI invocation. The token
+ * is now resolved at runtime from `gh auth token` (see git.js).
  */
 export function getConfig() {
   if (!fs.existsSync(CONFIG_FILE)) {
@@ -106,7 +110,18 @@ export function getConfig() {
   }
   try {
     const raw = fs.readFileSync(CONFIG_FILE, 'utf-8');
-    return { ...DEFAULTS, ...JSON.parse(raw) };
+    const parsed = JSON.parse(raw);
+    if (Object.prototype.hasOwnProperty.call(parsed, 'token')) {
+      delete parsed.token;
+      // Rewrite without the token to scrub the secret from disk.
+      try {
+        saveConfig(parsed);
+      } catch {
+        // If we can't rewrite (e.g. read-only fs), ignore — the in-memory
+        // copy is still safe and we'll try again next time.
+      }
+    }
+    return { ...DEFAULTS, ...parsed };
   } catch (err) {
     throw new Error(`Failed to read config at ${CONFIG_FILE}: ${err.message}`);
   }
@@ -114,13 +129,15 @@ export function getConfig() {
 
 /**
  * Write the config file. Creates the directory if needed.
- * Token is stored locally only — never committed to the sync repo.
+ * No secrets are stored here — the GitHub token is fetched at runtime.
  */
 export function saveConfig(config) {
   ensureConfigDir();
-  const data = JSON.stringify(config, null, 2) + '\n';
+  // Defensive: never persist a token field even if a caller passed one.
+  const { token: _drop, ...safe } = config;
+  const data = JSON.stringify(safe, null, 2) + '\n';
   fs.writeFileSync(CONFIG_FILE, data, 'utf-8');
-  // chmod 600 on the config file (Unix only — protects token)
+  // chmod 600 on the config file (Unix only — minor hardening)
   if (process.platform !== 'win32') {
     try {
       fs.chmodSync(CONFIG_FILE, 0o600);
@@ -135,7 +152,7 @@ export function saveConfig(config) {
  */
 export function requireConfig() {
   const config = getConfig();
-  if (!config || !config.repoUrl || !config.token) {
+  if (!config || !config.repoUrl) {
     throw new Error(
       'claude-profile is not initialized. Run "claude-profile init" first.'
     );
