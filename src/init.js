@@ -101,60 +101,47 @@ export async function init() {
     );
     console.log('');
 
-    // Detect gh CLI
+    // Auth: require gh CLI (or GH_TOKEN/GITHUB_TOKEN env var). The token
+    // is fetched at runtime — never persisted to ~/.claude-profile/config.json.
     const ghToken = getGhToken();
+    const envToken = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
+    if (!ghToken && !envToken) {
+      console.error(
+        'GitHub authentication required. Install the GitHub CLI from ' +
+          'https://cli.github.com and run "gh auth login", or set the ' +
+          'GH_TOKEN / GITHUB_TOKEN environment variable.'
+      );
+      return;
+    }
+
     let repoUrl;
-    let token;
 
     if (ghToken) {
       console.log('GitHub CLI detected and authenticated.');
-      const authMethod = await ask(
+      const username = getGhUsername();
+      if (username) console.log(`Logged in as: ${username}`);
+      console.log('');
+
+      const repoChoice = await ask(
         rl,
-        'Auth method: (1) Use gh CLI  (2) Enter PAT manually',
+        'Repo: (1) Create new "claude-profiles" repo  (2) Use existing repo URL',
         '1'
       );
 
-      if (authMethod === '1') {
-        token = ghToken;
-        const username = getGhUsername();
-        console.log(`Logged in as: ${username}`);
-        console.log('');
-
-        const repoChoice = await ask(
-          rl,
-          'Repo: (1) Create new "claude-profiles" repo  (2) Use existing repo URL',
-          '1'
-        );
-
-        if (repoChoice === '1') {
-          const repoName = await ask(rl, 'Repo name', 'claude-profiles');
-          console.log(`Creating private repo ${username}/${repoName}...`);
-          repoUrl = createRepoWithGh(repoName);
-          console.log(`Repo ready: ${repoUrl}`);
-        } else {
-          repoUrl = await ask(rl, 'GitHub repo URL', '');
-          if (!repoUrl) {
-            console.error('Error: Repo URL is required.');
-            return;
-          }
-        }
+      if (repoChoice === '1') {
+        const repoName = await ask(rl, 'Repo name', 'claude-profiles');
+        console.log(`Creating private repo ${username}/${repoName}...`);
+        repoUrl = createRepoWithGh(repoName);
+        console.log(`Repo ready: ${repoUrl}`);
       } else {
-        repoUrl = await ask(rl, 'GitHub repo URL (e.g. https://github.com/you/claude-profiles)', '');
+        repoUrl = await ask(rl, 'GitHub repo URL', '');
         if (!repoUrl) {
           console.error('Error: Repo URL is required.');
           return;
         }
-        token = await ask(rl, 'GitHub Personal Access Token (PAT)', '');
-        if (!token) {
-          console.error('Error: GitHub PAT is required.');
-          return;
-        }
       }
     } else {
-      console.log(
-        'Tip: Install the GitHub CLI (gh) to skip PAT setup. See https://cli.github.com'
-      );
-      console.log('');
+      console.log('Using GitHub token from environment.');
       repoUrl = await ask(
         rl,
         'GitHub repo URL (e.g. https://github.com/you/claude-profiles)',
@@ -162,11 +149,6 @@ export async function init() {
       );
       if (!repoUrl) {
         console.error('Error: Repo URL is required.');
-        return;
-      }
-      token = await ask(rl, 'GitHub Personal Access Token (PAT)', '');
-      if (!token) {
-        console.error('Error: GitHub PAT is required.');
         return;
       }
     }
@@ -180,10 +162,9 @@ export async function init() {
 
     rl.close();
 
-    // Save config
+    // Save config (no token field — fetched at runtime via gh CLI / env var)
     const config = {
       repoUrl,
-      token,
       deviceId,
       activeProfile: profileName,
       clonePath: getClonePath({ clonePath: '' }),
