@@ -8,7 +8,12 @@ import {
   acquireLock,
 } from './config.js';
 import { pullRepo } from './git.js';
-import { copyProfile, diffProfile, loadProfileIgnore } from './fs.js';
+import {
+  copyProfile,
+  diffProfile,
+  loadProfileIgnore,
+  assertProfileDevice,
+} from './fs.js';
 import { requireNoActiveSessions } from './session.js';
 
 /**
@@ -48,6 +53,12 @@ async function _doPull(config, profileName, options) {
       `Profile "${profileName}" not found in sync repo. ` +
         'Run "claude-profile list" to see available profiles.'
     );
+  }
+
+  // Device ownership guard: refuse if another device owns this profile.
+  // --force bypasses (e.g. when reclaiming a profile after renaming a device).
+  if (!options.force) {
+    assertProfileDevice(profileDir, profileName, config.deviceId, 'pull from');
   }
 
   const ig = loadProfileIgnore(config);

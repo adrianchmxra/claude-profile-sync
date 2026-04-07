@@ -33,7 +33,8 @@ program
   .command('pull')
   .description('Restore the active profile from remote to ~/.claude')
   .option('--dry-run', 'Show what would be pulled without making changes')
-  .action(wrapAction((opts) => pull({ dryRun: opts.dryRun })));
+  .option('--force', 'Bypass device-ownership check (use when reclaiming a profile on a new device)')
+  .action(wrapAction((opts) => pull({ dryRun: opts.dryRun, force: opts.force })));
 
 program
   .command('switch <name...>')

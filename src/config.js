@@ -27,6 +27,7 @@ export const ALWAYS_EXCLUDED = [
   'memory',
   'sessions',
   '.git',
+  '.device-id',
 ];
 
 /**

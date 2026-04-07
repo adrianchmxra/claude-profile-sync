@@ -228,3 +228,52 @@ export function ensureProfileDir(config, profileName) {
   }
   return dir;
 }
+
+/**
+ * Path to the device-id marker file inside a profile directory.
+ * The marker records which deviceId last pushed to this profile, so
+ * pull/push from a different device can be detected and refused.
+ */
+function getDeviceMarkerPath(profileDir) {
+  return path.join(profileDir, '.device-id');
+}
+
+/**
+ * Read the recorded deviceId from a profile dir, or null if no marker.
+ */
+export function readProfileDeviceId(profileDir) {
+  const p = getDeviceMarkerPath(profileDir);
+  if (!fs.existsSync(p)) return null;
+  try {
+    return fs.readFileSync(p, 'utf-8').trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Write the local deviceId into a profile dir as the new owner marker.
+ */
+export function writeProfileDeviceId(profileDir, deviceId) {
+  if (!fs.existsSync(profileDir)) {
+    fs.mkdirSync(profileDir, { recursive: true });
+  }
+  fs.writeFileSync(getDeviceMarkerPath(profileDir), deviceId + '\n', 'utf-8');
+}
+
+/**
+ * Check that the profile's recorded deviceId matches the local one.
+ * Throws a descriptive error if they mismatch. A profile with no marker
+ * yet is considered claimable (returns without error).
+ */
+export function assertProfileDevice(profileDir, profileName, localDeviceId, op) {
+  const recorded = readProfileDeviceId(profileDir);
+  if (recorded === null) return; // unclaimed — first push will stamp it
+  if (recorded === localDeviceId) return;
+  throw new Error(
+    `Refusing to ${op} profile "${profileName}": this profile is owned by ` +
+      `device "${recorded}", but the local device is "${localDeviceId}". ` +
+      `If this is intentional (e.g. you renamed a device or are reclaiming ` +
+      `the profile), re-run with --force to override.`
+  );
+}
