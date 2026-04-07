@@ -9,7 +9,13 @@ import {
   acquireLock,
 } from './config.js';
 import { pullRepo, commitAndPush, forcePush } from './git.js';
-import { copyProfile, diffProfile, loadProfileIgnore } from './fs.js';
+import {
+  copyProfile,
+  diffProfile,
+  loadProfileIgnore,
+  assertProfileDevice,
+  writeProfileDeviceId,
+} from './fs.js';
 
 /**
  * Push current ~/.claude state to the active profile in the sync repo.
@@ -73,12 +79,21 @@ async function _doPush(config, profileName, options) {
     await pullRepo(config);
   }
 
+  // Device ownership guard: refuse if another device owns this profile.
+  // --force bypasses (e.g. when reclaiming a profile after renaming a device).
+  if (!options.force) {
+    assertProfileDevice(profileDir, profileName, config.deviceId, 'push to');
+  }
+
   // Copy ~/.claude into profile directory
   console.log(`Copying ~/.claude to profile "${profileName}"... (${diff.summary})`);
   const result = copyProfile(claudeDir, profileDir, ig);
   const parts = [`Copied ${result.copied} files`];
   if (result.deleted > 0) parts.push(`deleted ${result.deleted} stale files`);
   console.log(`${parts.join(', ')}.`);
+
+  // Stamp this device as the current owner of the profile.
+  writeProfileDeviceId(profileDir, config.deviceId);
 
   // Update profiles.json timestamp
   const profilesData = readProfilesJson(config);
