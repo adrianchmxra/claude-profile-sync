@@ -11,7 +11,7 @@ import {
   acquireLock,
 } from './config.js';
 import { pullRepo, commitAndPush } from './git.js';
-import { copyProfile, diffProfile, loadProfileIgnore } from './fs.js';
+import { copyProfile, diffProfile, loadProfileIgnore, readProfileDeviceId, writeProfileDeviceId } from './fs.js';
 import { requireNoActiveSessions } from './session.js';
 
 /**
@@ -98,28 +98,35 @@ async function _doSwitch(config, currentName, targetName) {
   const diff = diffProfile(claudeDir, currentProfileDir, ig);
 
   if (diff.changed) {
-    // Step 3a: Snapshot current profile
-    console.log(`Step 3/7: Saving local changes to "${currentName}"... (${diff.summary})`);
-    if (!fs.existsSync(currentProfileDir)) {
-      fs.mkdirSync(currentProfileDir, { recursive: true });
+    // Device ownership check: skip snapshot if another device owns this profile
+    const recordedDevice = readProfileDeviceId(currentProfileDir);
+    if (recordedDevice !== null && recordedDevice !== config.deviceId) {
+      console.log(`Step 3/7: Skipping snapshot of '${currentName}' (owned by device '${recordedDevice}')`);
+    } else {
+      // Step 3a: Snapshot current profile
+      console.log(`Step 3/7: Saving local changes to "${currentName}"... (${diff.summary})`);
+      if (!fs.existsSync(currentProfileDir)) {
+        fs.mkdirSync(currentProfileDir, { recursive: true });
+      }
+      copyProfile(claudeDir, currentProfileDir, ig);
+      writeProfileDeviceId(currentProfileDir, config.deviceId);
+
+      // Step 3b-c: Commit and push snapshot
+      console.log('Step 3/7: Pushing snapshot to remote...');
+      const snapshotMsg = `snapshot: ${currentName} before switch to ${targetName}`;
+
+      try {
+        await commitAndPush(config, snapshotMsg);
+      } catch (err) {
+        // Step 3d: Push failed — ABORT. Do NOT touch ~/.claude.
+        throw new Error(
+          `ABORTED: Failed to push snapshot of "${currentName}". ` +
+            `~/.claude was NOT modified.\n${err.message}`
+        );
+      }
+
+      console.log('Snapshot pushed successfully.');
     }
-    copyProfile(claudeDir, currentProfileDir, ig);
-
-    // Step 3b-c: Commit and push snapshot
-    console.log('Step 3/7: Pushing snapshot to remote...');
-    const snapshotMsg = `snapshot: ${currentName} before switch to ${targetName}`;
-
-    try {
-      await commitAndPush(config, snapshotMsg);
-    } catch (err) {
-      // Step 3d: Push failed — ABORT. Do NOT touch ~/.claude.
-      throw new Error(
-        `ABORTED: Failed to push snapshot of "${currentName}". ` +
-          `~/.claude was NOT modified.\n${err.message}`
-      );
-    }
-
-    console.log('Snapshot pushed successfully.');
   } else {
     console.log('Step 3/7: No local changes to save. Skipping snapshot.');
   }
