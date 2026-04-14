@@ -102,6 +102,16 @@ export function copyProfile(srcDir, destDir, ig) {
     }
 
     try {
+      // Remove any existing symlink at the destination so copyFileSync
+      // doesn't fail trying to follow a broken symlink (ENOENT).
+      try {
+        const destStat = fs.lstatSync(destFile);
+        if (destStat.isSymbolicLink()) {
+          fs.unlinkSync(destFile);
+        }
+      } catch {
+        // File doesn't exist, copyFileSync will create it
+      }
       fs.copyFileSync(srcFile, destFile);
       copied++;
     } catch (err) {
