@@ -147,12 +147,31 @@ export async function cloneRepo(config) {
 
 /**
  * Pull latest changes from remote. Returns true if pull succeeded.
+ * Auto-stashes uncommitted changes to avoid conflicts with dirty working tree.
  */
 export async function pullRepo(config) {
   await ensureBareOrigin(config);
   const git = getGit(config);
   try {
-    await git.pull(authedUrl(config.repoUrl, getRuntimeToken()), 'main');
+    // Auto-stash any uncommitted changes before pulling
+    const status = await git.status();
+    const needsStash = !status.isClean();
+    if (needsStash) {
+      await git.stash(['push', '-m', 'claude-profile: auto-stash before pull']);
+    }
+
+    await git.pull(authedUrl(config.repoUrl, getRuntimeToken()), 'main', ['--rebase']);
+
+    if (needsStash) {
+      try {
+        await git.stash(['pop']);
+      } catch (stashErr) {
+        throw new Error(
+          'Pull succeeded but stash pop had conflicts. ' +
+            'Run "cd ~/.claude-profile/repo && git stash pop" and resolve manually.'
+        );
+      }
+    }
     return true;
   } catch (err) {
     // If there's no upstream yet (first push hasn't happened), that's OK
