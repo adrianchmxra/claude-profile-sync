@@ -5,16 +5,16 @@
   "commands": [
     {
       "name": "/profile",
-      "description": "Manage claude profiles: /profile list|switch|push|pull|new|delete|status",
+      "description": "Manage claude profiles: /profile list|switch|push|pull|new|delete|status|base|migrate",
       "arguments": [
         {
           "name": "subcommand",
-          "description": "The subcommand to run (list, switch, push, pull, new, delete, status)",
+          "description": "The subcommand to run (list, switch, push, pull, new, delete, status, base, migrate)",
           "required": true
         },
         {
           "name": "args",
-          "description": "Additional arguments for the subcommand (e.g. profile name for switch/new/delete)",
+          "description": "Additional arguments for the subcommand (e.g. profile name for switch/new/delete, 'add <relpath>' for base, '--all --dry-run' for migrate)",
           "required": false
         }
       ]

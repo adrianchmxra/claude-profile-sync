@@ -3,10 +3,12 @@ import {
   requireConfig,
   getClaudeDir,
   getProfilesDir,
+  getBaseDir,
   readProfilesJson,
   writeProfilesJson,
   validateProfileName,
   acquireLock,
+  isOverlayProfile,
 } from './config.js';
 import { pullRepo, commitAndPush, forcePush } from './git.js';
 import {
@@ -15,6 +17,7 @@ import {
   loadProfileIgnore,
   assertProfileDevice,
   writeProfileDeviceId,
+  snapshotOverlayProfile,
 } from './fs.js';
 
 /**
@@ -87,10 +90,26 @@ async function _doPush(config, profileName, options) {
 
   // Copy ~/.claude into profile directory
   console.log(`Copying ~/.claude to profile "${profileName}"... (${diff.summary})`);
-  const result = copyProfile(claudeDir, profileDir, ig);
-  const parts = [`Copied ${result.copied} files`];
-  if (result.deleted > 0) parts.push(`deleted ${result.deleted} stale files`);
-  console.log(`${parts.join(', ')}.`);
+  if (isOverlayProfile(config, profileName)) {
+    // Overlay profile: store non-layered as a full snapshot, and the layered
+    // region as a pure delta over base (identical-to-base layered files are
+    // not stored; removed ones are dropped from the overlay).
+    const res = snapshotOverlayProfile(claudeDir, getBaseDir(config), profileDir, ig);
+    const parts = [
+      `Copied ${res.nonLayered.copied} non-layered files`,
+      `overlay: ${res.overlayFiles.length} layered files (delta over base)`,
+    ];
+    if (res.nonLayered.deleted > 0) {
+      parts.push(`deleted ${res.nonLayered.deleted} stale non-layered files`);
+    }
+    console.log(`${parts.join(', ')}.`);
+  } else {
+    // Legacy full-snapshot profile: unchanged true-sync behaviour.
+    const result = copyProfile(claudeDir, profileDir, ig);
+    const parts = [`Copied ${result.copied} files`];
+    if (result.deleted > 0) parts.push(`deleted ${result.deleted} stale files`);
+    console.log(`${parts.join(', ')}.`);
+  }
 
   // Stamp this device as the current owner of the profile.
   writeProfileDeviceId(profileDir, config.deviceId);

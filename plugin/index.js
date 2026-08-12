@@ -21,9 +21,11 @@ export default function plugin(params) {
         '  switch <name>     Switch to a different profile\n' +
         '  push              Save current ~/.claude to remote\n' +
         '  pull              Restore active profile from remote\n' +
-        '  new <name>        Create a new profile\n' +
+        '  new <name>        Create a new profile (overlay mode; --full for legacy)\n' +
         '  delete <name>     Delete a profile\n' +
-        '  status            Show sync status\n',
+        '  status            Show sync status\n' +
+        '  base <sub>        Curate persistent base: show|add|remove|pull\n' +
+        '  migrate <name>    Flip profile(s) to overlay mode (--all, --dry-run)\n',
     };
   }
 
@@ -35,6 +37,8 @@ export default function plugin(params) {
     'new',
     'delete',
     'status',
+    'base',
+    'migrate',
   ];
 
   if (!validSubcommands.includes(subcommand)) {
