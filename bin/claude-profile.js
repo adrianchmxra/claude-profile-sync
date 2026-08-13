@@ -9,6 +9,8 @@ import { list } from '../src/list.js';
 import { newProfile } from '../src/new.js';
 import { deleteProfile } from '../src/delete.js';
 import { status } from '../src/status.js';
+import { base } from '../src/base.js';
+import { migrate } from '../src/migrate.js';
 
 const program = new Command();
 
@@ -48,8 +50,9 @@ program
 
 program
   .command('new <name...>')
-  .description('Create a new profile from current ~/.claude')
-  .action(wrapAction((parts) => newProfile(parts.join(' '))));
+  .description('Create a new profile from current ~/.claude (overlay mode by default)')
+  .option('--full', 'Create a legacy full-snapshot profile instead of an overlay profile')
+  .action(wrapAction((parts, opts) => newProfile(parts.join(' '), { full: opts.full })));
 
 program
   .command('delete <name...>')
@@ -61,6 +64,25 @@ program
   .command('status')
   .description('Show sync status')
   .action(wrapAction(status));
+
+program
+  .command('base <sub> [relpath...]')
+  .description('Curate the persistent base: base show|add <relpath>|remove <relpath>|pull')
+  .action(wrapAction((sub, relpathParts) => base(sub, relpathParts || [])));
+
+program
+  .command('migrate [name...]')
+  .description('Flip profile(s) to overlay mode and recompute overlay = layered minus base')
+  .option('--all', 'Migrate all profiles')
+  .option('--dry-run', 'Show what would change without writing/pushing')
+  .action(
+    wrapAction((parts, opts) =>
+      migrate((parts && parts.length ? parts.join(' ') : null), {
+        all: opts.all,
+        dryRun: opts.dryRun,
+      })
+    )
+  );
 
 program.parse();
 

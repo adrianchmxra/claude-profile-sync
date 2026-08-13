@@ -7,7 +7,7 @@
     "claude-profile": "./bin/claude-profile.js"
   },
   "scripts": {
-    "test": "echo \"No tests yet\" && exit 0"
+    "test": "node --test"
   },
   "keywords": [
     "claude",

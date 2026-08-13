@@ -4,8 +4,10 @@ import {
   requireConfig,
   getClaudeDir,
   getProfilesDir,
+  getBaseDir,
   validateProfileName,
   acquireLock,
+  isOverlayProfile,
 } from './config.js';
 import { pullRepo } from './git.js';
 import {
@@ -13,6 +15,9 @@ import {
   diffProfile,
   loadProfileIgnore,
   assertProfileDevice,
+  applyLayered,
+  splitLayered,
+  getSyncableFiles,
 } from './fs.js';
 import { requireNoActiveSessions } from './session.js';
 
@@ -93,11 +98,29 @@ async function _doPull(config, profileName, options) {
     return;
   }
 
-  // Sync profile directory to ~/.claude (true sync with deletion of stale files)
+  // Apply profile directory to ~/.claude.
   console.log(`Restoring profile "${profileName}" to ~/.claude... (${diff.summary})`);
-  const result = copyProfile(profileDir, claudeDir, ig);
-  const parts = [`Copied ${result.copied} files`];
-  if (result.deleted > 0) parts.push(`deleted ${result.deleted} stale files`);
-  console.log(`${parts.join(', ')}.`);
+  if (isOverlayProfile(config, profileName)) {
+    // Overlay profile: non-layered additive, layered clean-rebuild (base + overlay).
+    const profileSyncable = getSyncableFiles(profileDir, ig);
+    const { nonLayered } = splitLayered(profileSyncable);
+    const nlResult = copyProfile(profileDir, claudeDir, ig, {
+      additive: true,
+      files: nonLayered,
+    });
+    const layered = applyLayered(getBaseDir(config), profileDir, claudeDir, ig);
+    const parts = [
+      `Copied ${nlResult.copied} non-layered files`,
+      `layered rebuild: ${layered.fromBase} base + ${layered.fromOverlay} overlay`,
+    ];
+    if (layered.removed > 0) parts.push(`removed ${layered.removed} stale layered files`);
+    console.log(`${parts.join(', ')}.`);
+  } else {
+    // Legacy full-snapshot profile: unchanged true-sync behaviour.
+    const result = copyProfile(profileDir, claudeDir, ig);
+    const parts = [`Copied ${result.copied} files`];
+    if (result.deleted > 0) parts.push(`deleted ${result.deleted} stale files`);
+    console.log(`${parts.join(', ')}.`);
+  }
   console.log(`Profile "${profileName}" restored successfully.`);
 }

@@ -2,18 +2,49 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
-const CONFIG_DIR = path.join(os.homedir(), '.claude-profile');
-const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
+/**
+ * Resolve the "home" directory that anchors ~/.claude and ~/.claude-profile.
+ *
+ * Normally this is the real OS home directory. For testing (and only for
+ * testing) it can be overridden via the CLAUDE_PROFILE_HOME environment
+ * variable so a self-contained sandbox can point the CLI away from the
+ * user's live data. This is read lazily on every call so tests can set it
+ * before importing/invoking any command.
+ */
+export function getHomeDir() {
+  const override = process.env.CLAUDE_PROFILE_HOME;
+  if (override && override.trim()) {
+    return override.trim();
+  }
+  return os.homedir();
+}
+
+const CONFIG_FILE_NAME = 'config.json';
 
 /**
- * Default configuration values.
+ * Path to the config directory (~/.claude-profile). Computed lazily so the
+ * CLAUDE_PROFILE_HOME override is honoured even if it changes between calls.
  */
-const DEFAULTS = {
-  repoUrl: '',
-  deviceId: `${os.hostname()}-${process.platform}`,
-  activeProfile: '',
-  clonePath: path.join(CONFIG_DIR, 'repo'),
-};
+function configDir() {
+  return path.join(getHomeDir(), '.claude-profile');
+}
+
+function configFile() {
+  return path.join(configDir(), CONFIG_FILE_NAME);
+}
+
+/**
+ * Default configuration values. Computed lazily so the CLAUDE_PROFILE_HOME
+ * override affects the default clonePath.
+ */
+function defaults() {
+  return {
+    repoUrl: '',
+    deviceId: `${os.hostname()}-${process.platform}`,
+    activeProfile: '',
+    clonePath: path.join(configDir(), 'repo'),
+  };
+}
 
 /**
  * Files and directories inside ~/.claude that must NEVER be synced.
@@ -69,27 +100,28 @@ export function validateProfileName(name) {
  * Get the path to the user's ~/.claude directory.
  */
 export function getClaudeDir() {
-  return path.join(os.homedir(), '.claude');
+  return path.join(getHomeDir(), '.claude');
 }
 
 /**
  * Get the path to the config directory (~/.claude-profile).
  */
 export function getConfigDir() {
-  return CONFIG_DIR;
+  return configDir();
 }
 
 /**
  * Ensure the config directory exists with proper permissions.
  */
 function ensureConfigDir() {
-  if (!fs.existsSync(CONFIG_DIR)) {
-    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  const dir = configDir();
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
   }
   // chmod 700 on the config directory (Unix only)
   if (process.platform !== 'win32') {
     try {
-      fs.chmodSync(CONFIG_DIR, 0o700);
+      fs.chmodSync(dir, 0o700);
     } catch {
       // Ignore permission errors (e.g. on some network filesystems)
     }
@@ -105,11 +137,12 @@ function ensureConfigDir() {
  * is now resolved at runtime from `gh auth token` (see git.js).
  */
 export function getConfig() {
-  if (!fs.existsSync(CONFIG_FILE)) {
+  const file = configFile();
+  if (!fs.existsSync(file)) {
     return null;
   }
   try {
-    const raw = fs.readFileSync(CONFIG_FILE, 'utf-8');
+    const raw = fs.readFileSync(file, 'utf-8');
     const parsed = JSON.parse(raw);
     if (Object.prototype.hasOwnProperty.call(parsed, 'token')) {
       delete parsed.token;
@@ -121,9 +154,9 @@ export function getConfig() {
         // copy is still safe and we'll try again next time.
       }
     }
-    return { ...DEFAULTS, ...parsed };
+    return { ...defaults(), ...parsed };
   } catch (err) {
-    throw new Error(`Failed to read config at ${CONFIG_FILE}: ${err.message}`);
+    throw new Error(`Failed to read config at ${file}: ${err.message}`);
   }
 }
 
@@ -136,11 +169,12 @@ export function saveConfig(config) {
   // Defensive: never persist a token field even if a caller passed one.
   const { token: _drop, ...safe } = config;
   const data = JSON.stringify(safe, null, 2) + '\n';
-  fs.writeFileSync(CONFIG_FILE, data, 'utf-8');
+  const file = configFile();
+  fs.writeFileSync(file, data, 'utf-8');
   // chmod 600 on the config file (Unix only — minor hardening)
   if (process.platform !== 'win32') {
     try {
-      fs.chmodSync(CONFIG_FILE, 0o600);
+      fs.chmodSync(file, 0o600);
     } catch {
       // Ignore
     }
@@ -168,11 +202,20 @@ export function requireConfig() {
  * Get the absolute clone path (resolves ~ to homedir).
  */
 export function getClonePath(config) {
-  const p = config.clonePath || DEFAULTS.clonePath;
+  const p = config.clonePath || defaults().clonePath;
   if (p.startsWith('~')) {
-    return path.join(os.homedir(), p.slice(1));
+    return path.join(getHomeDir(), p.slice(1));
   }
   return path.resolve(p);
+}
+
+/**
+ * Get the base directory inside the cloned repo. The base holds the
+ * persistent, curated layered-region files (CLAUDE.md, agents/, commands/,
+ * skills/) that are applied under every overlay profile.
+ */
+export function getBaseDir(config) {
+  return path.join(getClonePath(config), 'base');
 }
 
 /**
@@ -209,7 +252,7 @@ function isProcessAlive(pid) {
  * @returns {function} A release function to call when done
  */
 export function acquireLock(operation) {
-  const lockPath = path.join(CONFIG_DIR, '.lock');
+  const lockPath = path.join(configDir(), '.lock');
 
   // Check for existing lock
   if (fs.existsSync(lockPath)) {
@@ -272,4 +315,21 @@ export function readProfilesJson(config) {
 export function writeProfilesJson(config, data) {
   const p = getProfilesJsonPath(config);
   fs.writeFileSync(p, JSON.stringify(data, null, 2) + '\n', 'utf-8');
+}
+
+/**
+ * Whether a given profile is in base+overlay mode.
+ *
+ * A profile is an overlay profile only if its profiles.json entry has
+ * `overlay: true`. Absent or false means legacy full-snapshot behaviour,
+ * which is preserved exactly as before.
+ *
+ * @param {object} config
+ * @param {string} profileName
+ * @returns {boolean}
+ */
+export function isOverlayProfile(config, profileName) {
+  const data = readProfilesJson(config);
+  const entry = data.profiles.find((p) => p.name === profileName);
+  return !!(entry && entry.overlay === true);
 }

@@ -6,12 +6,24 @@ import {
   saveConfig,
   getClaudeDir,
   getProfilesDir,
+  getBaseDir,
   readProfilesJson,
   validateProfileName,
   acquireLock,
+  isOverlayProfile,
 } from './config.js';
 import { pullRepo, commitAndPush } from './git.js';
-import { copyProfile, diffProfile, loadProfileIgnore, readProfileDeviceId, writeProfileDeviceId } from './fs.js';
+import {
+  copyProfile,
+  diffProfile,
+  loadProfileIgnore,
+  readProfileDeviceId,
+  writeProfileDeviceId,
+  applyLayered,
+  snapshotOverlayProfile,
+  splitLayered,
+  getSyncableFiles,
+} from './fs.js';
 import { requireNoActiveSessions } from './session.js';
 
 /**
@@ -108,7 +120,14 @@ async function _doSwitch(config, currentName, targetName) {
       if (!fs.existsSync(currentProfileDir)) {
         fs.mkdirSync(currentProfileDir, { recursive: true });
       }
-      copyProfile(claudeDir, currentProfileDir, ig);
+      if (isOverlayProfile(config, currentName)) {
+        // Overlay profile: store non-layered as a full snapshot, and the
+        // layered region as a pure delta over base.
+        snapshotOverlayProfile(claudeDir, getBaseDir(config), currentProfileDir, ig);
+      } else {
+        // Legacy full-snapshot profile: unchanged behaviour.
+        copyProfile(claudeDir, currentProfileDir, ig);
+      }
       writeProfileDeviceId(currentProfileDir, config.deviceId);
 
       // Step 3b-c: Commit and push snapshot
@@ -141,12 +160,35 @@ async function _doSwitch(config, currentName, targetName) {
     console.log('Creating backup of ~/.claude...');
     copyProfile(claudeDir, backupDir, ig);
 
-    // Step 4: Copy target profile to ~/.claude
+    // Step 4: Apply target profile to ~/.claude
     console.log(`Step 4/7: Applying profile "${targetName}" to ~/.claude...`);
-    const result = copyProfile(targetProfileDir, claudeDir, ig);
-    const parts = [`Copied ${result.copied} files`];
-    if (result.deleted > 0) parts.push(`deleted ${result.deleted} stale files`);
-    console.log(`${parts.join(', ')}.`);
+    if (isOverlayProfile(config, targetName)) {
+      // Overlay profile:
+      //   - Non-layered: additive copy (never delete non-layered data such as
+      //     credentials, knowledge, history — matches the "never deleted"
+      //     guarantee for non-layered data).
+      //   - Layered region: clean rebuild = wipe layered paths, then base,
+      //     then overlay on top (isolation from the previous overlay).
+      const targetSyncable = getSyncableFiles(targetProfileDir, ig);
+      const { nonLayered } = splitLayered(targetSyncable);
+      const nlResult = copyProfile(targetProfileDir, claudeDir, ig, {
+        additive: true,
+        files: nonLayered,
+      });
+      const layered = applyLayered(getBaseDir(config), targetProfileDir, claudeDir, ig);
+      const parts = [
+        `Copied ${nlResult.copied} non-layered files`,
+        `layered rebuild: ${layered.fromBase} base + ${layered.fromOverlay} overlay`,
+      ];
+      if (layered.removed > 0) parts.push(`removed ${layered.removed} stale layered files`);
+      console.log(`${parts.join(', ')}.`);
+    } else {
+      // Legacy full-snapshot profile: unchanged true-sync behaviour.
+      const result = copyProfile(targetProfileDir, claudeDir, ig);
+      const parts = [`Copied ${result.copied} files`];
+      if (result.deleted > 0) parts.push(`deleted ${result.deleted} stale files`);
+      console.log(`${parts.join(', ')}.`);
+    }
   } catch (err) {
     // Rollback: restore from backup
     console.error(`Failed to apply profile: ${err.message}`);

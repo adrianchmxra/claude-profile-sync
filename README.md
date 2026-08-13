@@ -36,14 +36,20 @@ Without `gh`, the wizard will ask for a repo URL and PAT manually.
 ## Commands
 
 ```
-claude-profile init                         # First-time setup wizard
-claude-profile push [--force] [--dry-run]   # Save ~/.claude to remote
-claude-profile pull [--dry-run]             # Restore from remote
-claude-profile switch <name>                # Switch profiles (atomic)
-claude-profile list                         # List all profiles
-claude-profile new <name>                   # Create new profile
-claude-profile delete <name> [--yes]        # Delete a profile
-claude-profile status                       # Show sync status
+claude-profile init                            # First-time setup wizard
+claude-profile push [--force] [--dry-run]      # Save ~/.claude to remote
+claude-profile pull [--dry-run] [--force]      # Restore from remote
+claude-profile switch <name>                   # Switch profiles (atomic)
+claude-profile list                            # List all profiles
+claude-profile new <name> [--full]             # Create new profile (overlay by default)
+claude-profile delete <name> [--yes]           # Delete a profile
+claude-profile status                          # Show sync status
+claude-profile base show                       # List the curated persistent base
+claude-profile base add <relpath>              # Add a layered item into the base
+claude-profile base remove <relpath>           # Remove an item from the base
+claude-profile base pull                       # Apply base to ~/.claude (no switch)
+claude-profile migrate <name>                  # Convert a profile to overlay mode
+claude-profile migrate --all [--dry-run]       # Convert all profiles to overlay mode
 ```
 
 ## How it works
@@ -52,11 +58,12 @@ Each profile is a snapshot of your `~/.claude` directory stored in a private Git
 
 ```
 your-profiles-repo/
+  base/               # Curated persistent layered files (CLAUDE.md, agents/, commands/, skills/)
   profiles/
-    home-pc/          # CLAUDE.md, settings.json, agents/, rules/, etc.
+    home-pc/          # Non-layered snapshot + layered OVERLAY (delta over base)
     work-laptop/
     work-desktop/
-  profiles.json       # Profile metadata
+  profiles.json       # Profile metadata (overlay profiles carry "overlay": true)
   .profileignore      # Extra exclusion patterns
 ```
 
@@ -64,9 +71,14 @@ your-profiles-repo/
 
 Everything inside `~/.claude/` **except**:
 - `~/.claude.json` (OAuth tokens -- never synced)
-- `projects/`, `teams/`, `tasks/`, `memory/` directories
-- `.git/`
+- `projects/`, `teams/`, `tasks/`, `memory/`, `sessions/` directories
+- `.git/`, `.device-id`
 - Patterns in `.profileignore`
+
+For **overlay profiles**, the syncable set is further split: the layered region
+(`CLAUDE.md`, `agents/`, `commands/`, `skills/`) is rebuilt from base + overlay
+on switch/pull, while all other syncable (non-layered) data is applied additively
+and never deleted. See [Base + swappable overlay](#base--swappable-overlay).
 
 ### .profileignore
 
@@ -78,9 +90,51 @@ tmp/
 *.bak
 ```
 
+### Base + swappable overlay
+
+Overlay mode lets you keep a curated **base** setup that persists across every
+profile, while auditioning whole candidate skill/agent sets on top of it safely.
+
+`~/.claude` is split into two regions:
+
+- **Layered region** — `CLAUDE.md`, `agents/`, `commands/`, `skills/`. On every
+  switch/pull this region is **fully reconstructed** as **base + overlay**:
+  1. the layered region in `~/.claude` is wiped,
+  2. the persistent `base/` layered files are applied,
+  3. the active profile's overlay (its layered delta over base) is applied on top.
+
+  This **clean rebuild** means stale layered files from the previously active
+  overlay are removed, so profiles are isolated from one another. A profile's
+  stored overlay is a **pure delta**: layered files identical to base are not
+  stored, and files you delete locally are dropped from the overlay.
+
+- **Non-layered data** — credentials, `.mcp.json`, `knowledge/`, history,
+  caches, and everything in the built-in exclusion list. This is treated
+  **additively and is never deleted** by a switch/pull. Your secrets and
+  accumulated knowledge follow you across every profile.
+
+Curate the base explicitly (nothing is auto-selected):
+
+```bash
+claude-profile base add agents/self-reviewing-implementer.md   # promote a file to base
+claude-profile base add commands                               # promote a whole layered dir
+claude-profile base show                                       # see what's in base
+claude-profile base remove agents/old.md                       # demote from base
+claude-profile base pull                                       # adopt base into ~/.claude now
+```
+
+New profiles are **overlay profiles** by default (empty overlay, so a fresh
+profile resolves to pure base). Pass `--full` to `new` for a legacy full
+snapshot instead. Convert existing profiles with `migrate <name>` or
+`migrate --all` (add `--dry-run` to preview). With an empty base, migrating is a
+no-op on effective behavior — the overlay simply equals the full layered region.
+
+Legacy profiles (those without `"overlay": true` in `profiles.json`) keep the
+original full-snapshot behavior unchanged.
+
 ### Switch atomicity
 
-When switching profiles, your current state is snapshot and pushed to remote **before** overwriting `~/.claude`. If the push fails, `~/.claude` is not modified.
+When switching profiles, your current state is snapshot and pushed to remote **before** overwriting `~/.claude`. If the push fails, `~/.claude` is not modified. This guarantee is preserved for overlay profiles — the current profile's overlay delta is snapshotted and pushed before the target is applied.
 
 ### Conflict handling
 
