@@ -15,7 +15,7 @@ import {
   copyProfile,
   diffProfile,
   loadProfileIgnore,
-  assertProfileDevice,
+  noteProfileWriter,
   writeProfileDeviceId,
   snapshotOverlayProfile,
 } from './fs.js';
@@ -82,11 +82,11 @@ async function _doPush(config, profileName, options) {
     await pullRepo(config);
   }
 
-  // Device ownership guard: refuse if another device owns this profile.
-  // --force bypasses (e.g. when reclaiming a profile after renaming a device).
-  if (!options.force) {
-    assertProfileDevice(profileDir, profileName, config.deviceId, 'push to');
-  }
+  // Device identity is metadata, not authorization: profiles describe
+  // configurations, not machines, so a profile may legitimately be pushed
+  // from several devices. We pulled above, so the remote state is already
+  // merged in — just note a different writer and continue.
+  noteProfileWriter(profileDir, profileName, config.deviceId, 'push');
 
   // Copy ~/.claude into profile directory
   console.log(`Copying ~/.claude to profile "${profileName}"... (${diff.summary})`);
@@ -111,7 +111,7 @@ async function _doPush(config, profileName, options) {
     console.log(`${parts.join(', ')}.`);
   }
 
-  // Stamp this device as the current owner of the profile.
+  // Record this device as the profile's most recent writer (metadata only).
   writeProfileDeviceId(profileDir, config.deviceId);
 
   // Update profiles.json timestamp

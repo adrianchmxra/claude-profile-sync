@@ -156,17 +156,13 @@ export async function init() {
     const defaultDevice = `${os.hostname()}-${process.platform}`;
     const deviceId = await ask(rl, 'Device name', defaultDevice);
 
-    const defaultProfile = deviceId.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
-    const profileName = await ask(rl, 'Profile name for this device', defaultProfile);
-    validateProfileName(profileName);
-
-    rl.close();
-
-    // Save config (no token field — fetched at runtime via gh CLI / env var)
+    // Save config (no token field — fetched at runtime via gh CLI / env var).
+    // activeProfile is filled in below, once the repo is cloned and we know
+    // which profiles already exist.
     const config = {
       repoUrl,
       deviceId,
-      activeProfile: profileName,
+      activeProfile: '',
       clonePath: getClonePath({ clonePath: '' }),
     };
     saveConfig(config);
@@ -177,56 +173,96 @@ export async function init() {
     await cloneRepo(config);
     console.log('Repo ready.');
 
-    // Create profiles directory
-    const profilesDir = getProfilesDir(config);
-    const profileDir = path.join(profilesDir, profileName);
-    if (!fs.existsSync(profileDir)) {
-      fs.mkdirSync(profileDir, { recursive: true });
-    }
-
-    // Copy current ~/.claude into the profile
-    const claudeDir = getClaudeDir();
-    if (fs.existsSync(claudeDir)) {
-      console.log(`Copying current ~/.claude to profile "${profileName}"...`);
-      const ig = loadProfileIgnore(config);
-      const result = copyProfile(claudeDir, profileDir, ig);
-      console.log(`Copied ${result.copied} files.`);
-    }
-
-    // Create/update profiles.json
-    const profilesData = readProfilesJson(config);
-    const exists = profilesData.profiles.some((p) => p.name === profileName);
-    if (!exists) {
-      profilesData.profiles.push({
-        name: profileName,
-        createdAt: new Date().toISOString(),
-        lastPushedAt: new Date().toISOString(),
-      });
-    }
-    writeProfilesJson(config, profilesData);
-
-    // Create default .profileignore if it doesn't exist
-    const clonePath = getClonePath(config);
-    const profileIgnorePath = path.join(clonePath, '.profileignore');
-    if (!fs.existsSync(profileIgnorePath)) {
-      fs.writeFileSync(
-        profileIgnorePath,
-        '# Add patterns here to exclude files from syncing\n# Uses .gitignore syntax\n',
-        'utf-8'
+    // A profile describes a configuration, not a machine. Ask which profile
+    // to use only AFTER cloning, so a device joining an existing repo can
+    // adopt a profile that is already there instead of minting a new
+    // device-shaped one — which is what a device-derived default encouraged.
+    const existingNames = readProfilesJson(config).profiles.map((p) => p.name);
+    let profileName;
+    if (existingNames.length > 0) {
+      console.log('');
+      console.log('Profiles already in this repo:');
+      for (const n of existingNames) console.log(`  ${n}`);
+      console.log('');
+      profileName = await ask(
+        rl,
+        'Profile to use (an existing name adopts it, a new name creates one)',
+        existingNames[0]
       );
+    } else {
+      console.log('');
+      console.log('Name this profile after the configuration it holds rather than this');
+      console.log('machine (e.g. "product", "review", "minimal"). Profiles are meant to');
+      console.log('be shared across your devices and swapped by purpose.');
+      profileName = await ask(rl, 'Profile name', 'default');
+    }
+    validateProfileName(profileName);
+
+    rl.close();
+
+    const adopting = existingNames.includes(profileName);
+    config.activeProfile = profileName;
+    saveConfig(config);
+
+    if (adopting) {
+      console.log('');
+      console.log(`Adopted existing profile "${profileName}".`);
+      console.log('~/.claude was left untouched. To bring the profile down, close all');
+      console.log('Claude Code sessions and run: claude-profile pull');
     }
 
-    // Commit and push
-    console.log('Pushing initial profile to remote...');
-    try {
-      await commitAndPush(
-        config,
-        `init: add profile "${profileName}" from ${deviceId}`
-      );
-      console.log('Pushed successfully.');
-    } catch (err) {
-      console.error(`Warning: Push failed: ${err.message}`);
-      console.log('Your profile is saved locally. Run "claude-profile push" to retry.');
+    if (!adopting) {
+      // Create profiles directory
+        const profilesDir = getProfilesDir(config);
+      const profileDir = path.join(profilesDir, profileName);
+      if (!fs.existsSync(profileDir)) {
+        fs.mkdirSync(profileDir, { recursive: true });
+      }
+
+      // Copy current ~/.claude into the profile
+      const claudeDir = getClaudeDir();
+      if (fs.existsSync(claudeDir)) {
+        console.log(`Copying current ~/.claude to profile "${profileName}"...`);
+        const ig = loadProfileIgnore(config);
+        const result = copyProfile(claudeDir, profileDir, ig);
+        console.log(`Copied ${result.copied} files.`);
+      }
+
+      // Create/update profiles.json
+      const profilesData = readProfilesJson(config);
+      const exists = profilesData.profiles.some((p) => p.name === profileName);
+      if (!exists) {
+        profilesData.profiles.push({
+          name: profileName,
+          createdAt: new Date().toISOString(),
+          lastPushedAt: new Date().toISOString(),
+        });
+      }
+      writeProfilesJson(config, profilesData);
+
+      // Create default .profileignore if it doesn't exist
+      const clonePath = getClonePath(config);
+      const profileIgnorePath = path.join(clonePath, '.profileignore');
+      if (!fs.existsSync(profileIgnorePath)) {
+        fs.writeFileSync(
+          profileIgnorePath,
+          '# Add patterns here to exclude files from syncing\n# Uses .gitignore syntax\n',
+          'utf-8'
+        );
+      }
+
+      // Commit and push
+      console.log('Pushing initial profile to remote...');
+      try {
+        await commitAndPush(
+          config,
+          `init: add profile "${profileName}" from ${deviceId}`
+        );
+        console.log('Pushed successfully.');
+      } catch (err) {
+        console.error(`Warning: Push failed: ${err.message}`);
+        console.log('Your profile is saved locally. Run "claude-profile push" to retry.');
+      }
     }
 
     console.log('');
