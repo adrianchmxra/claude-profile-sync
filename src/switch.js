@@ -17,7 +17,7 @@ import {
   copyProfile,
   diffProfile,
   loadProfileIgnore,
-  readProfileDeviceId,
+  noteProfileWriter,
   writeProfileDeviceId,
   applyLayered,
   snapshotOverlayProfile,
@@ -120,42 +120,41 @@ async function _doSwitch(config, currentName, targetName) {
   if (!currentName) {
     console.log('Step 3/7: No active profile to snapshot. Skipping snapshot.');
   } else if (diff.changed) {
-    // Device ownership check: skip snapshot if another device owns this profile
-    const recordedDevice = readProfileDeviceId(currentProfileDir);
-    if (recordedDevice !== null && recordedDevice !== config.deviceId) {
-      console.log(`Step 3/7: Skipping snapshot of '${currentName}' (owned by device '${recordedDevice}')`);
-    } else {
-      // Step 3a: Snapshot current profile
-      console.log(`Step 3/7: Saving local changes to "${currentName}"... (${diff.summary})`);
-      if (!fs.existsSync(currentProfileDir)) {
-        fs.mkdirSync(currentProfileDir, { recursive: true });
-      }
-      if (isOverlayProfile(config, currentName)) {
-        // Overlay profile: store non-layered as a full snapshot, and the
-        // layered region as a pure delta over base.
-        snapshotOverlayProfile(claudeDir, getBaseDir(config), currentProfileDir, ig);
-      } else {
-        // Legacy full-snapshot profile: unchanged behaviour.
-        copyProfile(claudeDir, currentProfileDir, ig);
-      }
-      writeProfileDeviceId(currentProfileDir, config.deviceId);
+    // Snapshot regardless of which device last pushed this profile.
+    // Skipping here silently discarded the local changes we just detected,
+    // which is unacceptable once a profile is shared across devices.
+    noteProfileWriter(currentProfileDir, currentName, config.deviceId, 'snapshot');
 
-      // Step 3b-c: Commit and push snapshot
-      console.log('Step 3/7: Pushing snapshot to remote...');
-      const snapshotMsg = `snapshot: ${currentName} before switch to ${targetName}`;
-
-      try {
-        await commitAndPush(config, snapshotMsg);
-      } catch (err) {
-        // Step 3d: Push failed — ABORT. Do NOT touch ~/.claude.
-        throw new Error(
-          `ABORTED: Failed to push snapshot of "${currentName}". ` +
-            `~/.claude was NOT modified.\n${err.message}`
-        );
-      }
-
-      console.log('Snapshot pushed successfully.');
+    // Step 3a: Snapshot current profile
+    console.log(`Step 3/7: Saving local changes to "${currentName}"... (${diff.summary})`);
+    if (!fs.existsSync(currentProfileDir)) {
+      fs.mkdirSync(currentProfileDir, { recursive: true });
     }
+    if (isOverlayProfile(config, currentName)) {
+      // Overlay profile: store non-layered as a full snapshot, and the
+      // layered region as a pure delta over base.
+      snapshotOverlayProfile(claudeDir, getBaseDir(config), currentProfileDir, ig);
+    } else {
+      // Legacy full-snapshot profile: unchanged behaviour.
+      copyProfile(claudeDir, currentProfileDir, ig);
+    }
+    writeProfileDeviceId(currentProfileDir, config.deviceId);
+
+    // Step 3b-c: Commit and push snapshot
+    console.log('Step 3/7: Pushing snapshot to remote...');
+    const snapshotMsg = `snapshot: ${currentName} before switch to ${targetName}`;
+
+    try {
+      await commitAndPush(config, snapshotMsg);
+    } catch (err) {
+      // Step 3d: Push failed — ABORT. Do NOT touch ~/.claude.
+      throw new Error(
+        `ABORTED: Failed to push snapshot of "${currentName}". ` +
+          `~/.claude was NOT modified.\n${err.message}`
+      );
+    }
+
+    console.log('Snapshot pushed successfully.');
   } else {
     console.log('Step 3/7: No local changes to save. Skipping snapshot.');
   }

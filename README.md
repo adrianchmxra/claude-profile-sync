@@ -1,8 +1,8 @@
 # claude-profile-sync
 
-Developers often work across multiple machines: a home PC, a work laptop, maybe a client-provided device. Every time you switch, your Claude Code setup (global instructions, custom agents, rules, plugins, settings) is different or missing entirely. There's no built-in way to keep `~/.claude` in sync across devices.
+Your Claude Code setup (global instructions, custom agents, commands, skills, settings) is one big mutable directory. There's no built-in way to keep several configurations around, swap between them, or carry them between machines.
 
-claude-profile-sync solves this by using a private GitHub repository as the backend. Each device gets a named profile, and switching between them is a single command. Your current state is always snapshot before a switch, so nothing gets lost.
+claude-profile-sync solves this by using a private GitHub repository as the backend. A **profile is a configuration, not a machine** — name them for the work they do (`product`, `review`, `minimal`), use the same profile from as many devices as you like, and swap between them with a single command. Your current state is always snapshot before a switch, so nothing gets lost.
 
 ## Prerequisites
 
@@ -63,9 +63,9 @@ Each profile is a snapshot of your `~/.claude` directory stored in a private Git
 your-profiles-repo/
   base/               # Curated persistent layered files (CLAUDE.md, agents/, commands/, skills/)
   profiles/
-    home-pc/          # Non-layered snapshot + layered OVERLAY (delta over base)
-    work-laptop/
-    work-desktop/
+    product/          # Non-layered snapshot + layered OVERLAY (delta over base)
+    review/
+    minimal/
   profiles.json       # Profile metadata (overlay profiles carry "overlay": true)
   .profileignore      # Extra exclusion patterns
 ```
@@ -164,6 +164,18 @@ no-op on effective behavior — the overlay simply equals the full layered regio
 Legacy profiles (those without `"overlay": true` in `profiles.json`) keep the
 original full-snapshot behavior unchanged.
 
+### Devices
+
+A profile can be used from any number of devices at once. `deviceId` and the
+per-profile `.device-id` marker are **metadata**: they record which machine
+last pushed a profile, and show up in commit messages and in a note when a
+different device pushes or pulls. They are not a lock — an earlier version
+refused the second device outright, which made a shared configuration
+unusable.
+
+Protection against clobbering newer remote state comes from pulling before a
+push and from git's non-fast-forward rejection, not from that marker.
+
 ### Switch atomicity
 
 When switching profiles, your current state is snapshot and pushed to remote **before** overwriting `~/.claude`. If the push fails, `~/.claude` is not modified. This guarantee is preserved for overlay profiles — the current profile's overlay delta is snapshotted and pushed before the target is applied.
@@ -192,7 +204,7 @@ Then use inside Claude Code:
 
 ```
 /claude-profile-sync:profile list
-/claude-profile-sync:profile switch work-laptop
+/claude-profile-sync:profile switch review
 /claude-profile-sync:profile push
 /claude-profile-sync:profile pull
 /claude-profile-sync:profile status
@@ -207,7 +219,7 @@ Stored at `~/.claude-profile/config.json` (permissions: 600 on Unix):
   "repoUrl": "https://github.com/you/claude-profiles",
   "token": "<GitHub PAT or gh auth token>",
   "deviceId": "home-desktop-win32",
-  "activeProfile": "home-pc",
+  "activeProfile": "product",
   "clonePath": "~/.claude-profile/repo"
 }
 ```

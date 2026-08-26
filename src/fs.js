@@ -348,20 +348,27 @@ export function writeProfileDeviceId(profileDir, deviceId) {
 }
 
 /**
- * Check that the profile's recorded deviceId matches the local one.
- * Throws a descriptive error if they mismatch. A profile with no marker
- * yet is considered claimable (returns without error).
+ * Report when a profile was last pushed by a different device.
+ *
+ * Device identity is METADATA, not authorization. A profile describes a
+ * configuration, not a machine, so the same profile is expected to be used
+ * from several devices at once. Treating the marker as ownership meant the
+ * second device to touch a shared profile was refused outright.
+ *
+ * The property that actually matters — do not clobber newer remote state —
+ * is enforced by pulling before a push and by git's non-fast-forward
+ * rejection, not by this marker.
+ *
+ * @returns {string|null} the recorded device id, or null if never pushed
  */
-export function assertProfileDevice(profileDir, profileName, localDeviceId, op) {
+export function noteProfileWriter(profileDir, profileName, localDeviceId, op) {
   const recorded = readProfileDeviceId(profileDir);
-  if (recorded === null) return; // unclaimed — first push will stamp it
-  if (recorded === localDeviceId) return;
-  throw new Error(
-    `Refusing to ${op} profile "${profileName}": this profile is owned by ` +
-      `device "${recorded}", but the local device is "${localDeviceId}". ` +
-      `If this is intentional (e.g. you renamed a device or are reclaiming ` +
-      `the profile), re-run with --force to override.`
+  if (recorded === null || recorded === localDeviceId) return recorded;
+  console.log(
+    `Note: profile "${profileName}" was last pushed by device "${recorded}". ` +
+      `Continuing ${op} from "${localDeviceId}".`
   );
+  return recorded;
 }
 
 // ---------------------------------------------------------------------------

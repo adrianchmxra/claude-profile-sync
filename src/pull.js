@@ -14,7 +14,7 @@ import {
   copyProfile,
   diffProfile,
   loadProfileIgnore,
-  assertProfileDevice,
+  noteProfileWriter,
   applyLayered,
   splitLayered,
   getSyncableFiles,
@@ -60,11 +60,9 @@ async function _doPull(config, profileName, options) {
     );
   }
 
-  // Device ownership guard: refuse if another device owns this profile.
-  // --force bypasses (e.g. when reclaiming a profile after renaming a device).
-  if (!options.force) {
-    assertProfileDevice(profileDir, profileName, config.deviceId, 'pull from');
-  }
+  // Pulling only writes ~/.claude, never the repo, so another device having
+  // pushed this profile last is information rather than a conflict.
+  noteProfileWriter(profileDir, profileName, config.deviceId, 'pull');
 
   const ig = loadProfileIgnore(config);
 
