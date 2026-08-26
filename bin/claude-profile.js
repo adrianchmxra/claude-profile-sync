@@ -8,6 +8,8 @@ import { switchProfile } from '../src/switch.js';
 import { list } from '../src/list.js';
 import { newProfile } from '../src/new.js';
 import { deleteProfile } from '../src/delete.js';
+import { renameProfile } from '../src/rename.js';
+import { copyProfileToNew } from '../src/copy.js';
 import { status } from '../src/status.js';
 import { base } from '../src/base.js';
 import { migrate } from '../src/migrate.js';
@@ -61,6 +63,16 @@ program
   .action(wrapAction((parts, opts) => deleteProfile(parts.join(' '), { yes: opts.yes })));
 
 program
+  .command('rename <oldName> <newName>')
+  .description('Rename a profile (repo-only; quote names containing spaces)')
+  .action(wrapAction((oldName, newName) => renameProfile(oldName, newName)));
+
+program
+  .command('copy <sourceName> <newName>')
+  .description('Copy a profile to a new name, leaving the source untouched')
+  .action(wrapAction((sourceName, newName) => copyProfileToNew(sourceName, newName)));
+
+program
   .command('status')
   .description('Show sync status')
   .action(wrapAction(status));
@@ -68,7 +80,8 @@ program
 program
   .command('base <sub> [relpath...]')
   .description('Curate the persistent base: base show|add <relpath>|remove <relpath>|pull')
-  .action(wrapAction((sub, relpathParts) => base(sub, relpathParts || [])));
+  .option('--from <profile>', 'For "add": source the item from a stored profile instead of ~/.claude')
+  .action(wrapAction((sub, relpathParts, opts) => base(sub, relpathParts || [], { from: opts.from })));
 
 program
   .command('migrate [name...]')
