@@ -43,9 +43,12 @@ claude-profile switch <name>                   # Switch profiles (atomic)
 claude-profile list                            # List all profiles
 claude-profile new <name> [--full]             # Create new profile (overlay by default)
 claude-profile delete <name> [--yes]           # Delete a profile
+claude-profile rename <old> <new>              # Rename a profile (repo-only)
+claude-profile copy <source> <new>             # Copy a profile, leaving the source intact
 claude-profile status                          # Show sync status
 claude-profile base show                       # List the curated persistent base
 claude-profile base add <relpath>              # Add a layered item into the base
+claude-profile base add <relpath> --from <profile>   # ...sourced from a stored profile
 claude-profile base remove <relpath>           # Remove an item from the base
 claude-profile base pull                       # Apply base to ~/.claude (no switch)
 claude-profile migrate <name>                  # Convert a profile to overlay mode
@@ -122,6 +125,35 @@ claude-profile base show                                       # see what's in b
 claude-profile base remove agents/old.md                       # demote from base
 claude-profile base pull                                       # adopt base into ~/.claude now
 ```
+
+`base add` normally reads from `~/.claude`. On a machine whose `~/.claude` is
+empty — a fresh device, before any pull — pass `--from` to source the item
+from a profile already stored in the repo instead:
+
+```bash
+claude-profile base add agents/core.md --from "Home PC"   # promote from a stored profile
+claude-profile base add agents --from "Home PC"           # ...or a whole layered dir
+```
+
+> **`base pull` is destructive to the layered region.** It rebuilds
+> `CLAUDE.md`, `agents/`, `commands/` and `skills/` from base alone, so any
+> layered file not in base is deleted. Non-layered data is never touched.
+
+### Restructuring profiles
+
+`rename` and `copy` are repo-only — they never read or write `~/.claude`, so
+unlike `switch`/`pull`/`base pull` they work with Claude Code running:
+
+```bash
+claude-profile copy "Home PC" product     # derive a new profile from an old one
+claude-profile rename "Home PC" product   # relabel in place
+```
+
+Copy first, verify, then `delete` the original — that way a restructure never
+passes through a state where the old profile is already gone. A copy starts
+**unowned** (it does not inherit the source's `.device-id`), so the first
+device to push claims it. A rename keeps ownership, since it is the same
+profile under a new label.
 
 New profiles are **overlay profiles** by default (empty overlay, so a fresh
 profile resolves to pure base). Pass `--full` to `new` for a legacy full

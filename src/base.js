@@ -4,6 +4,9 @@ import {
   requireConfig,
   getClaudeDir,
   getBaseDir,
+  getProfilesDir,
+  readProfilesJson,
+  validateProfileName,
   acquireLock,
 } from './config.js';
 import { pullRepo, commitAndPush } from './git.js';
@@ -27,8 +30,13 @@ import { requireNoActiveSessions } from './session.js';
  *   base add <relpath>      copy a layered item from ~/.claude into base/
  *   base remove <relpath>   remove an item from base/
  *   base pull               apply base/ layered files to ~/.claude
+ *
+ * `base add` also accepts `--from <profile>`, which sources the item from a
+ * stored profile in the repo instead of ~/.claude. That makes base curatable
+ * from a machine whose ~/.claude is empty (a fresh device), and without the
+ * switch/pull round-trip that would otherwise be required.
  */
-export async function base(sub, relpathParts = []) {
+export async function base(sub, relpathParts = [], options = {}) {
   const config = requireConfig();
 
   if (!sub) {
@@ -40,7 +48,7 @@ export async function base(sub, relpathParts = []) {
     case 'show':
       return baseShow(config);
     case 'add':
-      return baseAdd(config, joinRelpath(relpathParts));
+      return baseAdd(config, joinRelpath(relpathParts), options);
     case 'remove':
     case 'rm':
       return baseRemove(config, joinRelpath(relpathParts));
@@ -60,6 +68,9 @@ function printBaseUsage() {
       '  add <relpath>      Add a layered item (file or dir) from ~/.claude into base/\n' +
       '  remove <relpath>   Remove an item from base/\n' +
       '  pull               Apply base/ layered files to ~/.claude\n\n' +
+      'Options:\n' +
+      '  --from <profile>   For "add": source the item from a stored profile\n' +
+      '                     in the repo instead of ~/.claude.\n\n' +
       'The layered region is: CLAUDE.md, agents/, commands/, skills/.'
   );
 }
@@ -123,36 +134,59 @@ function baseShow(config) {
 }
 
 /**
- * Add a layered file or directory from ~/.claude into base/.
- * The item must exist in ~/.claude and be within the layered region.
+ * Add a layered file or directory into base/.
+ *
+ * The item is sourced from ~/.claude by default, or from a stored profile in
+ * the repo when `options.from` names one. Either way it must be within the
+ * layered region.
+ *
+ * @param {object} config
+ * @param {string} relpath
+ * @param {object} [options] - { from?: string } source profile name
  */
-async function baseAdd(config, relpath) {
+async function baseAdd(config, relpath, options = {}) {
   const rel = normalizeLayeredRelpath(relpath);
-  const claudeDir = getClaudeDir();
   const baseDir = getBaseDir(config);
   const ig = loadProfileIgnore(config);
-
-  const src = path.join(claudeDir, rel);
-  if (!fs.existsSync(src)) {
-    throw new Error(`"${rel}" does not exist in ~/.claude.`);
-  }
+  const fromProfile = options.from ? validateProfileName(options.from) : null;
 
   const releaseLock = acquireLock('base-add');
   try {
     console.log('Pulling latest from remote...');
     await pullRepo(config);
 
+    // Resolve the source only AFTER pulling: with --from it lives inside the
+    // repo, so it is not guaranteed to exist (or be current) before the pull.
+    let srcDir;
+    let sourceLabel;
+    if (fromProfile) {
+      const profilesData = readProfilesJson(config);
+      if (!profilesData.profiles.some((p) => p.name === fromProfile)) {
+        throw new Error(`Profile "${fromProfile}" not found.`);
+      }
+      srcDir = path.join(getProfilesDir(config), fromProfile);
+      sourceLabel = `profile "${fromProfile}"`;
+    } else {
+      srcDir = getClaudeDir();
+      sourceLabel = '~/.claude';
+    }
+
+    const src = path.join(srcDir, rel);
+    if (!fs.existsSync(src)) {
+      throw new Error(`"${rel}" does not exist in ${sourceLabel}.`);
+    }
+
     const stat = fs.statSync(src);
     let filesToCopy;
     if (stat.isDirectory()) {
       // All syncable layered files under this directory.
       const prefix = rel.endsWith('/') ? rel : rel + '/';
-      filesToCopy = getLayeredFiles(claudeDir, ig).filter(
+      filesToCopy = getLayeredFiles(srcDir, ig).filter(
         (f) => f === rel || f.startsWith(prefix)
       );
     } else {
       // Single file — still respect ignore rules.
-      filesToCopy = getLayeredFiles(claudeDir, ig).filter((f) => f === rel);
+      filesToCopy = getLayeredFiles(srcDir, ig).filter((f) => f === rel);
     }
 
     if (filesToCopy.length === 0) {
@@ -166,15 +200,24 @@ async function baseAdd(config, relpath) {
     }
     // Additive copy scoped to exactly these files — never deletes anything
     // else already curated in base.
-    const result = copyProfile(claudeDir, baseDir, ig, {
+    const result = copyProfile(srcDir, baseDir, ig, {
       additive: true,
       files: filesToCopy,
     });
-    console.log(`Added ${result.copied} file(s) from "${rel}" to base.`);
+    console.log(`Added ${result.copied} file(s) from "${rel}" (${sourceLabel}) to base.`);
 
     console.log('Pushing base update to remote...');
-    await commitAndPush(config, `base: add "${rel}" from ${config.deviceId}`);
+    await commitAndPush(
+      config,
+      `base: add "${rel}" from ${fromProfile ? sourceLabel : config.deviceId}`
+    );
     console.log(`Base updated. "${rel}" is now part of the persistent base.`);
+    if (fromProfile) {
+      console.log(
+        `Note: "${fromProfile}" still stores its own copy. If it is an overlay ` +
+          'profile, its next push drops the file from the overlay as redundant.'
+      );
+    }
   } finally {
     releaseLock();
   }
