@@ -107,9 +107,19 @@ async function _doSwitch(config, currentName, targetName) {
 
   // Step 2: Diff ~/.claude against current profile
   console.log('Step 2/7: Checking for local changes...');
-  const diff = diffProfile(claudeDir, currentProfileDir, ig);
 
-  if (diff.changed) {
+  // No active profile (fresh init, or a config that never recorded one).
+  // There is nothing to snapshot — and critically, path.join(profilesDir, '')
+  // resolves to profiles/ ITSELF, so snapshotting here would true-sync
+  // ~/.claude over the profiles directory and delete every stored profile.
+  // Skip straight to applying the target.
+  const diff = currentName
+    ? diffProfile(claudeDir, currentProfileDir, ig)
+    : { changed: false, summary: '' };
+
+  if (!currentName) {
+    console.log('Step 3/7: No active profile to snapshot. Skipping snapshot.');
+  } else if (diff.changed) {
     // Device ownership check: skip snapshot if another device owns this profile
     const recordedDevice = readProfileDeviceId(currentProfileDir);
     if (recordedDevice !== null && recordedDevice !== config.deviceId) {
